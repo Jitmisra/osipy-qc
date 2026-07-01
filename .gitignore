@@ -1,0 +1,24 @@
+# environments
+.venv/
+venv/
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+# os
+.DS_Store
+
+# ---- your own scans / pipeline outputs ----
+# Keep the folders in the repo, but NEVER commit anything dropped into them.
+data/*
+!data/.gitkeep
+!data/README.md
+output/*
+!output/.gitkeep
+
+# never commit real / patient data, wherever it lands
+Data_for_Agnik/
+*_S_*.nii.gz
