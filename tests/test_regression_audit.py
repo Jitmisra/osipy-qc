@@ -68,11 +68,17 @@ def test_vendor_concatenated_name_still_detected():
 
 
 # --- bug 4: healthy right-skew was wrongly WARNed (OR logic) ---
-def test_histogram_right_skew_passes():
+# The skewness VERDICT has since been retracted entirely: its -0.5 cutoff was a
+# generic statistics textbook heuristic (Bulmer 1979) with no ASL/CBF basis, and
+# the "ExploreASL-style histogram QC" justification was untrue — neither
+# ExploreASL nor ASLPrep computes CBF skewness at all. The check now reports the
+# shape as INFO. This test is kept to pin the original bug's intent: a healthy
+# right-skewed distribution must never be graded as a problem.
+def test_histogram_right_skew_is_not_penalised():
     cbf, gm = _gm([40, 45, 48, 50, 52, 55, 90])   # positive (right) skew, no negatives
     r = histogram_check(cbf=cbf, gm=gm)
     assert r.metric["skewness"] > 0
-    assert r.verdict == Verdict.PASS               # right-skew alone must NOT warn
+    assert r.verdict == Verdict.INFO               # reported, never graded
 
 
 # --- hardening: ratio of two negatives must not be a false PASS ---

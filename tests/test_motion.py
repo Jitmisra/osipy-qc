@@ -21,13 +21,40 @@ def test_fwd_rotation_scaling():
     assert abs(framewise_displacement(mp)[0] - 0.5) < 1e-9
 
 
-def test_motion_verdict_bands():
+def test_motion_calm_passes():
     calm = np.cumsum(np.full((20, 6), 0.001), axis=0)      # tiny steady drift -> low FWD
-    assert motion_check(motion_params=calm).verdict == Verdict.PASS
+    r = motion_check(motion_params=calm)
+    assert r.verdict == Verdict.PASS
+    assert r.metric["n_frames_over_censor"] == 0
 
+
+def test_motion_fails_on_mean_fwd_above_aslprep_rule():
+    """The ONE citable motion verdict: Adebimpe 2022 excludes participants with
+    MEAN framewise displacement > 1 mm. So the FAIL must key off the mean."""
+    # each step: trans 0.4*3 = 1.2 mm -> mean FWD 1.2 > 1.0
+    jerky = np.cumsum(np.tile([0.4, 0.4, 0.4, 0, 0, 0], (10, 1)), axis=0)
+    r = motion_check(motion_params=jerky)
+    assert r.metric["mean_fwd_mm"] > 1.0
+    assert r.verdict == Verdict.FAIL
+
+
+def test_motion_below_mean_rule_but_over_censor_line_warns():
+    """mean FWD 0.85 mm is BELOW ASLPrep's 1 mm exclusion rule, so it must not
+    FAIL — but the frame exceeds Power 2012's 0.5 mm per-frame censoring line,
+    which is worth a WARN. (An earlier version wrongly FAILed this.)"""
     jerky = np.array([[0, 0, 0, 0, 0, 0],
-                      [0.10, 0.05, 0.20, 0.005, 0.002, 0.003]])  # FWD 0.85 -> FAIL
-    assert motion_check(motion_params=jerky).verdict == Verdict.FAIL
+                      [0.10, 0.05, 0.20, 0.005, 0.002, 0.003]])  # FWD 0.85
+    r = motion_check(motion_params=jerky)
+    assert abs(r.metric["mean_fwd_mm"] - 0.85) < 1e-6
+    assert r.metric["n_frames_over_censor"] == 1
+    assert r.verdict == Verdict.WARN
+
+
+def test_motion_non_strict_demotes_fail():
+    from osipy_qc.core.config import QCConfig
+
+    jerky = np.cumsum(np.tile([0.4, 0.4, 0.4, 0, 0, 0], (10, 1)), axis=0)
+    assert motion_check(motion_params=jerky, cfg=QCConfig(strict=False)).verdict == Verdict.WARN
 
 
 def test_dvars_from_series():

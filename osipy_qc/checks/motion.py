@@ -11,6 +11,21 @@ FWD per consecutive frame-pair, motion params [tx, ty, tz, rx, ry, rz]
 
 DVARS = RMS over voxels of the temporal difference of the (optionally mean-scaled)
 4D signal, per frame-pair.
+
+Which threshold grades which statistic
+--------------------------------------
+Both published motion numbers are real, but they describe DIFFERENT statistics
+and were previously wired to the wrong ones:
+
+    fd_mean_fail_mm  = 1.0   Adebimpe 2022 (ASLPrep): "we excluded participants
+                             with MEAN frame-wise displacement greater than 1 mm."
+                             -> applied to the MEAN. This is the citable verdict.
+
+    fd_frame_censor_mm = 0.5 Power 2012: a PER-FRAME censoring threshold, chosen
+                             (in Power's own words) by studying plots of dozens of
+                             healthy adults. It is not a subject-level mean cutoff,
+                             so here it only COUNTS how many frames a censoring
+                             pass would drop.
 """
 
 from __future__ import annotations
@@ -62,14 +77,32 @@ def motion_check(motion_params=None, asl_4d=None, brain=None,
         fwd = framewise_displacement(motion_params, cfg.head_radius_mm)
         if fwd.size:
             mean_fwd, max_fwd = float(fwd.mean()), float(fwd.max())
-            metric.update({"mean_fwd_mm": round(mean_fwd, 4), "max_fwd_mm": round(max_fwd, 4),
-                           "n_frames": int(fwd.size + 1)})
-            if mean_fwd < 0.2 and max_fwd <= cfg.fd_fail_mm:
-                verdict, reason = Verdict.PASS, f"mean FWD {mean_fwd:.3f} mm (low motion)"
-            elif mean_fwd <= cfg.fd_warn_mm:
-                verdict, reason = Verdict.WARN, f"mean FWD {mean_fwd:.3f} mm (moderate motion)"
+            # Frames a per-frame censoring rule would drop (Power 2012's 0.5 mm).
+            n_censor = int(np.count_nonzero(fwd > cfg.fd_frame_censor_mm))
+            censor_frac = n_censor / fwd.size
+            metric.update({
+                "mean_fwd_mm": round(mean_fwd, 4),
+                "max_fwd_mm": round(max_fwd, 4),
+                "n_frames": int(fwd.size + 1),
+                "n_frames_over_censor": n_censor,
+                "censored_fraction": round(censor_frac, 4),
+                "censor_threshold_mm": cfg.fd_frame_censor_mm,
+            })
+            # Each threshold is now applied to the statistic its source defines:
+            #   mean FWD > 1.0 mm  -> Adebimpe 2022's subject-exclusion rule (published).
+            #   per-frame > 0.5 mm -> Power 2012's censoring rule (published) - counted,
+            #                         not used as a subject-level mean cutoff.
+            if mean_fwd > cfg.fd_mean_fail_mm:
+                verdict = Verdict.FAIL if cfg.strict else Verdict.WARN
+                reason = (f"mean FWD {mean_fwd:.3f} mm > {cfg.fd_mean_fail_mm} mm "
+                          "(ASLPrep excludes these)")
+            elif censor_frac > cfg.fd_censor_frac_warn:
+                verdict = Verdict.WARN
+                reason = (f"mean FWD {mean_fwd:.3f} mm, but {censor_frac*100:.0f}% of frames "
+                          f"exceed the {cfg.fd_frame_censor_mm} mm censoring line")
             else:
-                verdict, reason = Verdict.FAIL, f"mean FWD {mean_fwd:.3f} mm (excessive motion)"
+                verdict = Verdict.PASS
+                reason = f"mean FWD {mean_fwd:.3f} mm ({n_censor}/{fwd.size} frames over censor line)"
 
     if asl_4d is not None:
         dv = dvars(asl_4d, brain)
