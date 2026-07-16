@@ -10,7 +10,32 @@ from __future__ import annotations
 
 import argparse
 
+from .core.config import Provenance, THRESHOLD_PROVENANCE
 from .report import run_qc
+
+
+def _print_provenance() -> None:
+    """Where every threshold came from. Answers 'how did you get this number?'
+    for each row - including where the honest answer is 'I didn't'."""
+    from .core.config import QCConfig
+
+    cfg = QCConfig()
+    order = [Provenance.PUBLISHED, Provenance.IMPLEMENTATION, Provenance.UNCALIBRATED]
+    header = {
+        Provenance.PUBLISHED: "PUBLISHED - a paper states this number for this purpose",
+        Provenance.IMPLEMENTATION: "IMPLEMENTATION - reference code uses it; no paper states it",
+        Provenance.UNCALIBRATED: ("UNCALIBRATED - our engineering default, NOT calibrated. "
+                                  "These never FAIL alone."),
+    }
+    for level in order:
+        rows = [(f, c, n) for f, (lv, c, n) in THRESHOLD_PROVENANCE.items() if lv is level]
+        print(f"\n=== {header[level]} ({len(rows)}) ===\n")
+        for field, citation, note in rows:
+            value = getattr(cfg, field, "?")
+            print(f"  {field:22s} = {value}")
+            print(f"    source: {citation}")
+            print(f"    says  : {note}\n")
+    print("Full write-up: THRESHOLD_PROVENANCE.md\n")
 
 
 def _print_report(report) -> None:
@@ -27,7 +52,13 @@ def main(argv=None) -> int:
     ap.add_argument("folder", nargs="?", help="folder of raw NIfTIs to QC")
     ap.add_argument("--json", action="store_true", help="print the JSON report")
     ap.add_argument("--demo", action="store_true", help="run the full Stream B on synthetic data")
+    ap.add_argument("--provenance", action="store_true",
+                    help="print where every threshold came from, then exit")
     args = ap.parse_args(argv)
+
+    if args.provenance:
+        _print_provenance()
+        return 0
 
     if args.demo:
         from .synth import synthetic_case
