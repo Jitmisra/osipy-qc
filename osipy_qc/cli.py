@@ -54,21 +54,34 @@ def main(argv=None) -> int:
     ap.add_argument("--demo", action="store_true", help="run the full Stream B on synthetic data")
     ap.add_argument("--provenance", action="store_true",
                     help="print where every threshold came from, then exit")
+    ap.add_argument("--html", metavar="PATH",
+                    help="write a self-contained visual HTML report to PATH")
+    ap.add_argument("--population", default="adult",
+                    help="age group for the CBF bands: neonate_term, neonate_preterm, "
+                         "infant, child, adolescent, adult, elderly (default: adult)")
     args = ap.parse_args(argv)
 
     if args.provenance:
         _print_provenance()
         return 0
 
+    from .core.config import for_population
+    try:
+        cfg = for_population(args.population)
+    except ValueError as exc:
+        ap.error(str(exc))
+        return 2
+
     if args.demo:
         from .synth import synthetic_case
         c = synthetic_case(quality="clean", seed=0)
         inputs = {"cbf": c.cbf, "gm": c.gm, "wm": c.wm, "csf": c.csf,
                   "brain": c.brain, "voxel_mm": c.voxel_mm}
-        report = run_qc(inputs)
+        report = run_qc(inputs, cfg=cfg)
     elif args.folder:
         from .io import load_folder
-        report = run_qc(load_folder(args.folder))
+        inputs = load_folder(args.folder)
+        report = run_qc(inputs, cfg=cfg)
     else:
         ap.error("provide a folder, or use --demo")
         return 2
@@ -77,6 +90,11 @@ def main(argv=None) -> int:
         print(report.to_json())
     else:
         _print_report(report)
+
+    if args.html:
+        from .report_html import write_html
+        write_html(report, args.html, inputs=inputs, cfg=cfg)
+        print(f"visual report written to {args.html}")
     return 0
 
 
