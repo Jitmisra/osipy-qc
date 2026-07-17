@@ -12,17 +12,38 @@ This doc is the exhaustive one: every function, every parameter.
 ## 1. Command line
 
 ```bash
-osipy-qc --demo                 # grade a built-in synthetic CBF map (full Stream B)
+osipy-qc --serve                 # web UI: upload a CBF map in the browser  <- easiest
+osipy-qc --demo                  # grade a built-in synthetic CBF map (full Stream B)
 osipy-qc <folder>                # QC a folder of raw NIfTIs (Stream A)
 osipy-qc <folder> --json         # same, machine-readable JSON
+osipy-qc --demo --html r.html    # write a self-contained visual report
+osipy-qc --provenance            # where every threshold came from
 python -m osipy_qc <folder>      # identical, module form
 ```
 
 | flag | type | meaning |
 |---|---|---|
-| `folder` | positional, optional | path to a folder of raw `.nii`/`.nii.gz` files. Recurses into subfolders. Not needed with `--demo`. |
+| `folder` | positional, optional | path to a folder of raw `.nii`/`.nii.gz` files. Recurses into subfolders. Not needed with `--demo`/`--serve`. |
 | `--json` | flag | print the full JSON report instead of the human-readable table |
 | `--demo` | flag | ignore `folder`; grade a synthetic "clean" CBF map instead |
+| `--html PATH` | path | also write a self-contained visual HTML report (images + histograms) |
+| `--population NAME` | str | CBF bands to grade against: `neonate_term`, `neonate_preterm`, `infant`, `child`, `adolescent`, `adult` (default), `elderly` |
+| `--provenance` | flag | print the source of every threshold, then exit |
+| `--serve` | flag | start the local web UI (upload → report) |
+| `--port N` | int | port for `--serve` (default 8000) |
+| `--no-browser` | flag | with `--serve`, don't auto-open a browser |
+
+### The web UI
+```bash
+osipy-qc --serve            # -> http://127.0.0.1:8000
+```
+Upload a CBF map (+ optional GM/WM/CSF), pick the population, get the full visual
+report. Files are graded in a temp folder and deleted immediately — nothing is
+stored or sent anywhere.
+
+> ⚠️ This is a **local** tool. It binds to `127.0.0.1` and is deliberately not
+> hardened for public hosting (no auth, no rate limiting, no sandboxing around the
+> NIfTI parser). Public deployment is a separate job.
 
 ---
 
@@ -76,11 +97,13 @@ grading silently-wrong data.
 | `1.qei` | B | `cbf, gm, wm, csf`, optional `voxel_mm` | Quality Evaluation Index (Dolui 2024) |
 | `2.1.spatial_cov` | B | `cbf, gm` | spatial CoV — ExploreASL 3-tier |
 | `2.2.snr` | B | `cbf, gm`, optional `asl_4d, brain` | spatial SNR (+ tSNR if a 4D series is given) |
-| `2.3.histogram` | B | `cbf, gm` | GM CBF skewness + negative fraction |
-| `3.1.cbf_level` | B | `cbf, gm, wm` | mean/median GM & WM CBF in range |
+| `2.3.histogram` | B | `cbf, gm` | GM CBF shape — **INFO only, never graded** (no published skewness cutoff exists) |
+| `3.1.cbf_level` | B | `cbf, gm, wm` | mean/median GM & WM CBF in range (population-dependent) |
 | `3.2.gm_wm_ratio` | B | `cbf, gm, wm` | GM brighter than WM (scale-free) |
 | `3.3.negative_gm` | B | `cbf, gm` | fraction of negative GM voxels |
+| `3.4.deep_gm_ratio` | B | `cbf, deep_gm, cortical_gm` | **neonatal only** — deep GM should exceed cortical GM |
 | `4.1.coregistration` | B | `asl_mask, struct_mask` | Dice overlap, ASL vs T1 brain mask |
+| `4.2.coverage` | B | `cbf, gm`, optional `wm` | how much of the tissue ROI the ASL actually imaged |
 | `5.1.schema` | A | `sidecar` (BIDS JSON dict), `detected` | BIDS field validation, degrades gracefully |
 | `5.2.volume_integrity` | A | `asl_4d` or `n_volumes`, `structure` | even control/label volume count |
 | `5.3.swap` | A | `asl_4d`, `background_suppression`, `structure` | control brighter than label (N/A under BS) |
@@ -97,7 +120,7 @@ checks safely.
 
 ---
 
-## 4. Configuration — every threshold lives in one place
+## 4. Configuration — every threshold lives in one place, with its provenance
 
 ```python
 from osipy_qc import run_qc, QCConfig
@@ -105,15 +128,53 @@ from osipy_qc import run_qc, QCConfig
 cfg = QCConfig(
     qei_pass=0.60,        # raise the QEI PASS bar from the default 0.55
     gm_cbf_lo=35.0,       # widen the GM CBF PASS band
-    scov_macro=0.70,      # loosen the macrovascular sCoV cutoff
+    scov_artifact=1.10,   # loosen the artifactual sCoV cutoff
+    strict=False,         # demote UNCALIBRATED FAILs to WARN (clinical cohorts)
 )
 report = run_qc(inputs, cfg=cfg)
 ```
 
-All ~30 tunable values (QEI curve constants, sCoV/SNR bands, CBF level bands,
-M0 TR minimum, motion thresholds, Dice cutoffs, ...) are fields on
-`QCConfig` — see `osipy_qc/core/config.py` for the full list with their defaults
-and the source each one comes from.
+### Population profiles — CBF norms move across the lifespan
+```python
+from osipy_qc.core.config import for_population
+
+cfg = for_population("neonate_term")   # or child / adolescent / adult / elderly ...
+```
+A child's normal GM CBF (~97) sits at the top of the adult band; a neonate's
+(~16) is far below it. `for_population()` **raises** on an unknown name rather
+than silently grading a neonate against adult bands.
+
+### Provenance — "how did you get this number?"
+```python
+from osipy_qc.core.config import provenance_of, uncalibrated_fields
+
+provenance_of("gm_cbf_lo")   # (PUBLISHED, 'Alsop 2015 ... doi:10.1002/mrm.25197', 'verbatim: "40-100 ..."')
+uncalibrated_fields()        # the 16 numbers we cannot cite
+```
+Every threshold is tagged **published** (a paper states it), **implementation**
+(reference code uses it), or **uncalibrated** (our engineering default).
+**Uncalibrated thresholds never drive a FAIL on their own.** Run
+`osipy-qc --provenance` for the full dump, or see
+[THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md).
+
+### Organ profiles
+```python
+from osipy_qc.core.config import for_organ, skipped_for_organ
+
+skipped_for_organ("kidney")   # ('1.qei', '3.2.gm_wm_ratio', '3.4.deep_gm_ratio')
+report = run_qc(inputs, cfg=for_organ("kidney"),
+                checks=[c for c in all_checks() if c not in skipped_for_organ("kidney")])
+```
+QEI's spatial template (`2.5·GM + 1·WM`) is a **brain** tissue model, so it is
+explicitly skipped for other organs rather than silently producing a number.
+
+### Quantification parameters
+Not thresholds — acquisition facts the QC layer must be *told*, because they are
+absent from NIfTI headers. They default to `None` (unknown), never to a guess:
+```python
+cfg = QCConfig(labeling_efficiency=0.85, label_duration_s=1.8,
+               post_labeling_delay_s=2.0, t1_blood_s=1.65)
+```
 
 ---
 

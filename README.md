@@ -39,16 +39,25 @@ python -m pytest -q                  # -> 72 passed
 
 The repo ships a small **synthetic** example under [`example_data/`](example_data/)
 (safe, reproducible — **no real patient data**), so you can grade a CBF map right
-away. Run any of these three from the repo root:
+away. Run any of these from the repo root:
 
 ```bash
-# (a) grade the built-in synthetic clean map
+# (a) the web UI — upload a CBF map in your browser, get a visual report
+osipy-qc --serve
+
+# (b) grade the built-in synthetic clean map
 osipy-qc --demo
 
-# (b) run the end-to-end example script (synthetic clean/borderline/garbage + the bundled map)
+# (c) same, plus a self-contained visual report (images + histograms)
+osipy-qc --demo --html report.html
+
+# (d) where did every threshold come from?
+osipy-qc --provenance
+
+# (e) run the end-to-end example script (synthetic clean/borderline/garbage + the bundled map)
 python examples/run_examples.py
 
-# (c) grade the bundled example CBF map from its files (full Stream B, incl. QEI)
+# (f) grade the bundled example CBF map from its files (full Stream B, incl. QEI)
 python examples/grade_cbf_map.py example_data/example_cbf.nii.gz \
     --gm example_data/example_gm.nii.gz \
     --wm example_data/example_wm.nii.gz
@@ -231,13 +240,15 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 | Check | What |
 |---|---|
 | `1.qei` | Quality Evaluation Index (Dolui 2024), ASLPrep-faithful |
-| `2.1.spatial_cov` | spatial CoV, ExploreASL 3-tier (0.67 cutoff) |
+| `2.1.spatial_cov` | spatial CoV, ExploreASL 3-tier (vascular >0.67, artifactual >1.0) |
 | `2.2.snr` | spatial SNR (= 1/sCoV) + tSNR |
-| `2.3.histogram` | GM CBF skewness + negative fraction |
-| `3.1.cbf_level` | mean/median GM & WM CBF in range |
+| `2.3.histogram` | GM CBF shape — **INFO only** (no published skewness cutoff exists) |
+| `3.1.cbf_level` | mean/median GM & WM CBF in range — **population-dependent** |
 | `3.2.gm_wm_ratio` | GM brighter than WM (scale-free) |
 | `3.3.negative_gm` | fraction of negative GM voxels |
+| `3.4.deep_gm_ratio` | **neonatal** — deep GM should exceed cortical GM (Miranda 2006) |
 | `4.1.coregistration` | Dice / Jaccard of ASL vs T1 mask |
+| `4.2.coverage` | how much of the tissue ROI the ASL actually imaged (FOV mismatch) |
 
 **Stream A — was the raw scan acquired correctly?**
 | Check | What |
@@ -254,9 +265,29 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 
 ### Verdicts
 `PASS` · `WARN` · `FAIL` · `UNKNOWN` (a check that *should* run but couldn't — escalates the
-overall to WARN) · `N/A` (structurally inapplicable — excluded) · `INFO` (routing — excluded).
+overall to WARN) · `N/A` (structurally inapplicable — excluded) · `INFO` (reported, not
+graded — excluded).
 
 Overall = **any FAIL → FAIL**, else **any WARN/UNKNOWN → WARN**, else **PASS**.
+
+### Every threshold says where it came from
+Most of this field has **no published PASS/FAIL cutoffs** — ASLPrep, ExploreASL,
+MRIQC and fMRIPrep all report metrics and ship *zero* verdict logic. So rather than
+dress up guesses as evidence, each threshold is tagged **published** (11, each with
+a DOI), **implementation** (9), or **uncalibrated** (16, honestly declared).
+**Uncalibrated thresholds never drive a FAIL on their own**, and
+`QCConfig(strict=False)` softens the rest for clinical cohorts.
+
+```bash
+osipy-qc --provenance      # every number, its source, and what that source says
+```
+Full write-up: **[THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md)**.
+
+### Across the lifespan
+CBF norms move enormously with age (child GM ~97, adult ~58, neonate ~16
+mL/100g/min), so grading a neonate against adult bands would fail every scan.
+Pick the population — `--population neonate_term` on the CLI, or
+`for_population(...)` in Python. Sourced to Miranda 2006, Biagi 2007, Leoni 2017.
 
 ---
 
@@ -274,19 +305,30 @@ additionally verified against an independent re-derivation of the ASLPrep formul
 ```
 osipy-qc/
   osipy_qc/
-    core/        registry, result/verdict, config (all thresholds)
-    utils/       mathops, smoothing (pure-NumPy Gaussian), masks
-    checks/      one module per QC module (qei, noise, cbf_level, coreg, schema, m0, motion)
-    synth.py     synthetic data with known quality
-    io.py        NIfTI loaders + grade_cbf / find_oxford_asl / find_aslprep
-    report.py    the runner + JSON report
-    cli.py       command line
-  tests/         known-answer tests per module
-  examples/      run_examples.py, grade_cbf_map.py
-  example_data/  small synthetic CBF + tissue maps (safe demo data — committed)
-  data/          <- put YOUR scans here (git-ignored, never committed)
-  output/        <- pipeline outputs go here (git-ignored)
+    core/          registry, result/verdict, config (thresholds + provenance +
+                   population/organ profiles)
+    utils/         mathops, smoothing (pure-NumPy Gaussian), masks (coverage-aware),
+                   imaging (stdlib-only PNG/SVG encoders)
+    checks/        one module per QC module (qei, noise, cbf_level, coreg, schema, m0, motion)
+    synth.py       synthetic data with known quality
+    io.py          NIfTI loaders + grade_cbf / find_oxford_asl / find_aslprep
+    report.py      the runner + JSON report
+    report_html.py the visual report (images, histograms, provenance)
+    web.py         the local web UI (osipy-qc --serve)
+    cli.py         command line
+  tests/           known-answer tests per module (136)
+  examples/        run_examples.py, grade_cbf_map.py
+  example_data/    small synthetic CBF + tissue maps (safe demo data — committed)
+  data/            <- put YOUR scans here (git-ignored, never committed)
+  output/          <- pipeline outputs go here (git-ignored)
+  USAGE.md                 every function and CLI option
+  THRESHOLD_PROVENANCE.md  where every PASS/FAIL number came from
 ```
+
+**No plotting dependency.** The visual report encodes its own images with the
+standard library (PNG via `zlib`+`struct`, plots as hand-written SVG), so the
+runtime stays **numpy + nibabel** — no scipy, no nilearn, no matplotlib, and no
+web framework behind `--serve`.
 
 ## 9. Note on data & AI use
 
