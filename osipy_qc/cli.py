@@ -59,10 +59,20 @@ def main(argv=None) -> int:
     ap.add_argument("--population", default="adult",
                     help="age group for the CBF bands: neonate_term, neonate_preterm, "
                          "infant, child, adolescent, adult, elderly (default: adult)")
+    ap.add_argument("--serve", action="store_true",
+                    help="start the local web UI: upload a CBF map in the browser")
+    ap.add_argument("--port", type=int, default=8000, help="port for --serve (default 8000)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="with --serve, do not open a browser window")
     args = ap.parse_args(argv)
 
     if args.provenance:
         _print_provenance()
+        return 0
+
+    if args.serve:
+        from .web import serve
+        serve(port=args.port, open_browser=not args.no_browser)
         return 0
 
     from .core.config import for_population
