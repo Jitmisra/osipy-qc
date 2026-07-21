@@ -104,7 +104,9 @@ def test_overview_is_self_contained_and_lists_every_subject():
     subs, summ, cfg = _cohort()
     h = render_overview(subs, summ, cfg, "demo")
     assert h.startswith("<!DOCTYPE html>")
-    assert re.findall(r'(?:src|href)="(?!data:|#|/)', h) == []   # only data:/#/local links
+    # no external RESOURCE loads (images/scripts/styles): the page is self-contained.
+    # Outbound anchor hyperlinks (e.g. the README) are navigation, and allowed.
+    assert re.findall(r'src="(?!data:|#|/)', h) == []
     for s in subs:
         assert f"/subject/{s.sid}" in h            # ledger + sidebar link to each
     assert "Batch overview" in h
@@ -132,7 +134,7 @@ def test_subject_page_embeds_the_full_report():
 def test_subject_page_escapes_and_stays_local():
     subs, _summ, cfg = _cohort()
     h = render_subject(subs, subs[0], cfg)
-    assert re.findall(r'(?:src|href)="(?!data:|#|/)', h) == []
+    assert re.findall(r'src="(?!data:|#|/)', h) == []       # no external resource loads
 
 
 # --------------------------------------------------------------------------- #
@@ -281,3 +283,33 @@ def test_sidebar_dots_are_not_colour_only():
     subs, summ, cfg = _cohort()
     h = render_overview(subs, summ, cfg, "demo")
     assert 'aria-label=' in h            # verdict dots carry a text label
+
+
+# --------------------------------------------------------------------------- #
+# proposal parity: New Analysis modal + organ menu + subject report header
+# --------------------------------------------------------------------------- #
+def test_new_analysis_modal_shows_real_runnable_snippets():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert 'id="runmodal"' in h and 'onclick="openRun()"' in h
+    # the commands must be REAL (they exist in cli.py / the public API)
+    assert "osipy-qc --dashboard" in h
+    assert "from osipy_qc import grade_cbf" in h
+    assert 'href="/upload"' in h              # links to the actual upload console
+
+
+def test_organ_menu_marks_planned_organs_honestly():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert "organ-menu" in h
+    assert "planned" in h                      # kidney/placenta/preclinical are inert
+
+
+def test_subject_page_has_a_report_header_and_nav():
+    subs, _summ, cfg = _cohort()
+    fail = next(s for s in subs if s.overall == "FAIL")
+    h = render_subject(subs, fail, cfg)
+    assert "Participant quality report" in h
+    assert "window.print()" in h               # export
+    # prev/next step through the cohort
+    assert h.count('href="/subject/') >= 2

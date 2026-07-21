@@ -51,7 +51,7 @@ _DASH_CSS = """
 body{display:flex;min-height:100vh}
 .side{width:230px;flex:none;background:var(--surface);border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side .brand{padding:1.15rem 1.2rem;border-bottom:1px solid var(--line)}
+.side .side-brand{padding:1.15rem 1.2rem;border-bottom:1px solid var(--line)}
 .side .nav{padding:.9rem .7rem .3rem}
 .side .nav a{display:flex;align-items:center;gap:.55rem;padding:.5rem .65rem;border-radius:9px;
   color:var(--ink);font-size:.9rem;font-weight:500}
@@ -187,6 +187,45 @@ body{display:flex;min-height:100vh}
 #lb>*{width:min(1300px,96vw);height:auto;max-width:96vw;max-height:94vh;
   border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.55);background:#0c0b0a;padding:14px}
 .content figure img,.content figure svg{cursor:zoom-in}
+
+/* new-analysis modal */
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.98);opacity:0;
+  pointer-events:none;width:560px;max-width:94vw;max-height:90vh;overflow-y:auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);z-index:25;
+  padding:1.5rem 1.5rem 1.7rem;transition:opacity .18s ease,transform .18s ease}
+.modal.open{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal h3{font-size:1.15rem;margin-bottom:.2rem}
+.modal .snip-h{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--accent-600);font-weight:700;margin:1.1rem 0 .4rem}
+.modal .snip{background:#161311;color:#EDE6DE;border-radius:10px;padding:.85rem 1rem;margin:0;
+  font-family:var(--mono);font-size:.82rem;line-height:1.55;overflow-x:auto;white-space:pre}
+.modal .actions{display:flex;gap:.6rem;margin-top:1.4rem}
+
+/* organ disclosure menu */
+.organ-menu{position:relative}
+.organ-menu summary{cursor:pointer;list-style:none}
+.organ-menu summary::-webkit-details-marker{display:none}
+.organ-menu .caret{color:var(--faint);font-size:.7em}
+.omenu{position:absolute;top:calc(100% + .4rem);left:0;width:270px;background:var(--surface);
+  border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);z-index:12;padding:.4rem}
+.orow{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:.5rem;
+  padding:.45rem .55rem;border-radius:8px}
+.orow.sel{background:var(--accent-050)}
+.orow .og{font-size:1rem}.orow .ol{font-weight:600;font-size:.86rem}
+.orow .on-note{grid-column:2/4;font-size:.72rem;color:var(--muted)}
+.ostate{font-family:var(--mono);font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--faint);border:1px solid var(--line);border-radius:100px;padding:.1rem .4rem}
+.ostate.on{color:var(--pass);border-color:#BFE3D8;background:#EAF6F1}
+.omenu-foot{font-size:.7rem;color:var(--faint);padding:.5rem .55rem 0;border-top:1px solid var(--line);margin-top:.3rem}
+.omenu-foot code{background:var(--well);border-radius:4px;padding:.02rem .3rem}
+
+/* print: strip the app chrome, keep the report */
+@media print{
+  .side,.mtop,.drawer,.scrim,.modal,#lb,.page-actions,.viewbtn,.filterbar,.crumb{display:none!important}
+  body{display:block}.main{min-width:0}.content{max-width:none;padding:0}
+  .card,.check,figure{break-inside:avoid}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
 """
 
 _GEAR = ('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -222,7 +261,7 @@ def _sidebar(subjects: list[Subject], active: str | None, view: str, q: str) -> 
     plist.append("</div>")
     return (
         '<aside class="side">'
-        f'<div class="brand">{brand("QC-ToolBox v1.0")}</div>'
+        f'<div class="side-brand">{brand("QC-ToolBox V1.0")}</div>'
         '<nav class="nav">'
         f'<a class="{"on" if view=="overview" else ""}" href="/">&#9638;&nbsp; Overview</a>'
         f'<a class="{"on" if view=="upload" else ""}" href="/upload">&#43;&nbsp; Grade a new scan</a>'
@@ -240,14 +279,50 @@ def _mtop(cfg: QCConfig, view: str, overrides: dict) -> str:
     return (
         '<div class="mtop">'
         '<span class="app">QC-ToolBox V1.0</span>'
-        f'<span class="chip organ">&#129504; {esc(cfg.organ).title()}</span>'
+        f'{_organ_menu(cfg)}'
         f'{strict}'
         '<div class="spacer"></div>'
         f'{applied}'
         f'<nav><a class="{"on" if view=="overview" else ""}" href="/">Dashboard</a>'
         '<a class="off" title="planned">Projects</a><a class="off" title="planned">Archive</a></nav>'
+        '<button type="button" class="btn btn-sm" onclick="openRun()">&#43;&nbsp;New analysis</button>'
         f'<button type="button" class="btn btn-sm" onclick="openCfg()">{_GEAR}&nbsp;Thresholds</button>'
         '</div>'
+    )
+
+
+# organ glyph + the QC that changes per organ (honest 'planned' states from ORGANS)
+_ORGAN_META = {
+    "brain": ("\U0001F9E0", "Brain", "active", "All 19 checks apply."),
+    "kidney": ("\U0001FAC0", "Kidney", "planned", "Skips QEI, GM/WM ratio, deep-GM."),
+    "placenta": ("\U0001FAC3", "Placenta", "planned", "Body-ASL profile, not yet built."),
+    "preclinical": ("\U0001F401", "Preclinical", "planned", "Rodent ASL, not yet built."),
+}
+
+
+def _organ_menu(cfg: QCConfig) -> str:
+    """A disclosure menu of organs: the active one selected, the rest shown as
+    honest, inert 'planned' rows naming what each would change. Never a live link
+    to an organ the engine cannot grade."""
+    from .core.config import ORGANS
+
+    glyph, label, _st, _note = _ORGAN_META.get(cfg.organ, ("\U0001F9E0", cfg.organ.title(), "active", ""))
+    rows = []
+    for name, (g, lab, st, note) in _ORGAN_META.items():
+        active = name == cfg.organ
+        is_real = name in ORGANS          # brain + kidney stub exist in config
+        badge = ('<span class="ostate on">active</span>' if active else
+                 f'<span class="ostate">{esc(st)}</span>')
+        rows.append(f'<div class="orow{" sel" if active else ""}">'
+                    f'<span class="og">{g}</span><span class="ol">{esc(lab)}</span>{badge}'
+                    f'<span class="on-note">{esc(note)}</span></div>')
+    return (
+        '<details class="organ-menu"><summary class="chip organ">'
+        f'{glyph} {esc(label)} <span class="caret">&#9662;</span></summary>'
+        f'<div class="omenu">{"".join(rows)}'
+        '<div class="omenu-foot">Organ sets are chosen at grading time '
+        '(<code>--organ</code>); the dashboard shows the active one.</div>'
+        '</div></details>'
     )
 
 
@@ -292,6 +367,44 @@ def _config_drawer(cfg: QCConfig, back: str) -> str:
     )
 
 
+_CLI_SNIPPET = (
+    "# grade a whole cohort and open the dashboard\n"
+    "osipy-qc --dashboard ./cohort\n\n"
+    "# a single scan -> one self-contained HTML report\n"
+    "osipy-qc ./scan --html report.html\n\n"
+    "# try it on synthetic data (no data needed)\n"
+    "osipy-qc --dashboard-demo"
+)
+_PY_SNIPPET = (
+    "from osipy_qc import grade_cbf\n\n"
+    'report = grade_cbf("cbf.nii.gz", gm="gm.nii.gz", wm="wm.nii.gz")\n'
+    "print(report.overall.value)   # 'PASS' | 'WARN' | 'FAIL'\n"
+    "report.to_dict()              # full per-check JSON"
+)
+_REPO_URL = "https://github.com/Jitmisra/osipy-qc"
+
+
+def _new_analysis_modal() -> str:
+    """The proposal's 'New Analysis' modal: verbatim-runnable CLI + Python, and a
+    link to the upload console. Every command here is real (see cli.py / io.py)."""
+    return (
+        '<div class="scrim" id="runscrim" onclick="closeRun()"></div>'
+        '<div class="modal" id="runmodal" role="dialog" aria-label="Run a new analysis">'
+        '<button type="button" class="d-close" onclick="closeRun()" aria-label="close">&times;</button>'
+        '<h3>Run a new analysis</h3>'
+        '<p class="d-sub">Point the toolbox at your data from the command line or Python &mdash; '
+        'pure NumPy + nibabel, no framework, no build step.</p>'
+        '<div class="snip-h">Command line</div>'
+        f'<pre class="snip">{esc(_CLI_SNIPPET)}</pre>'
+        '<div class="snip-h">Python</div>'
+        f'<pre class="snip">{esc(_PY_SNIPPET)}</pre>'
+        '<div class="actions">'
+        '<a class="btn btn-primary" href="/upload">Open the upload console</a>'
+        f'<a class="btn" href="{_REPO_URL}" target="_blank" rel="noopener">README</a></div>'
+        '</div>'
+    )
+
+
 _LIGHTBOX_JS = """
 <div id="lb" onclick="this.classList.remove('open');this.innerHTML=''"></div>
 <script>
@@ -302,6 +415,10 @@ function applyPop(p){var v=POP_VALUES[p]; if(!v)return;
   for(var k in v){var el=document.querySelector('#drawer [name="'+k+'"]');
     if(el){el.value=v[k]; el.classList.add('changed');
       setTimeout(function(e){return function(){e.classList.remove('changed')}}(el),700);}}}
+function openRun(){document.getElementById('runmodal').classList.add('open');
+  document.getElementById('runscrim').classList.add('open');}
+function closeRun(){document.getElementById('runmodal').classList.remove('open');
+  document.getElementById('runscrim').classList.remove('open');}
 function filterLedger(btn){
   var f=btn.dataset.f, shown=0;
   document.querySelectorAll('.fchip').forEach(function(b){b.classList.toggle('on',b===btn);});
@@ -319,7 +436,7 @@ document.addEventListener('click',function(e){
   lb.innerHTML=''; lb.appendChild(el.cloneNode(true)); lb.classList.add('open');
 });
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){
-  document.getElementById('lb').classList.remove('open');closeCfg();}});
+  document.getElementById('lb').classList.remove('open');closeCfg();closeRun();}});
 </script>
 """.replace("__POP_VALUES__", _POP_VALUES_JSON)
 
@@ -333,7 +450,7 @@ def _shell(subjects, active, view, crumb, content, cfg, overrides, back) -> str:
         + _sidebar(subjects, active, view, back)
         + '<main class="main">' + _mtop(cfg, view, overrides)
         + f'<div class="content">{crumb_html}{content}</div></main>'
-        + _config_drawer(cfg, back) + _LIGHTBOX_JS
+        + _config_drawer(cfg, back) + _new_analysis_modal() + _LIGHTBOX_JS
         + "</body></html>"
     )
 
@@ -471,7 +588,34 @@ def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) ->
 
 def render_subject(subjects, subject, cfg, overrides=None) -> str:
     overrides = overrides or {}
-    body = report_body(subject.report, subject.inputs, subject.cfg, with_note=True)
+    scfg = subject.cfg
+    # prev/next through the cohort in the SAME (worst-first) order as the ledger
+    order = _worst_first(subjects)
+    ids = [s.sid for s in order]
+    i = ids.index(subject.sid) if subject.sid in ids else 0
+    prev_sid = ids[i - 1] if i > 0 else None
+    next_sid = ids[i + 1] if i < len(ids) - 1 else None
+
+    def step(sid, label, arrow_first):
+        if not sid:
+            return f'<span class="btn btn-sm" aria-disabled="true" style="opacity:.4">{label}</span>'
+        txt = f'&larr; {label}' if arrow_first else f'{label} &rarr;'
+        return f'<a class="btn btn-sm" href="/subject/{esc(sid)}">{txt}</a>'
+
+    fg = VERDICT_COLOURS.get(subject.overall, ("#8A8079", ""))[0]
+    head = (
+        '<div class="page-head"><div>'
+        '<h1 class="page-h">Participant quality report</h1>'
+        f'<p class="page-sub"><b class="num">{esc(subject.sid)}</b> &middot; '
+        f'{esc(scfg.population)} profile &middot; '
+        f'<b style="color:{fg}">{esc(subject.overall)}</b></p></div>'
+        '<div class="page-actions">'
+        + step(prev_sid, "Prev", True) + step(next_sid, "Next", False)
+        + '<button class="btn btn-sm" onclick="openCfg()">' + _GEAR + '&nbsp;Thresholds</button>'
+        '<button class="btn btn-sm btn-primary" onclick="window.print()">Print / Save PDF</button>'
+        '</div></div>'
+    )
+    body = head + report_body(subject.report, subject.inputs, scfg, with_note=True)
     crumb = f'<a href="/">Overview</a> / <b>{esc(subject.sid)}</b>'
     back = f"/subject/{subject.sid}"
-    return _shell(subjects, subject.sid, "subject", crumb, body, subject.cfg, overrides, back)
+    return _shell(subjects, subject.sid, "subject", crumb, body, scfg, overrides, back)

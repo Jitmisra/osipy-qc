@@ -60,7 +60,7 @@ BASE_CSS = """
 :root{
   --paper:#FAF8F5; --well:#F1ECE5; --surface:#FFFFFF;
   --ink:#1C1B1A; --muted:#6E6864; --faint:#9A938C; --line:#E5E0DA;
-  --accent:#AC4D2A; --accent-600:#8E3D1F; --accent-050:#FBEEE6; --orange:#D98026;
+  --accent:#AC4D2A; --accent-600:#8E3D1F; --accent-050:#FBEEE6;
   --pass:#2A8A73; --warn:#B26A0B; --fail:#A43122; --info:#3B6FA8;
   --radius:14px; --radius-sm:10px;
   --shadow:0 1px 2px rgba(28,27,26,.04), 0 10px 26px -14px rgba(28,27,26,.16);
