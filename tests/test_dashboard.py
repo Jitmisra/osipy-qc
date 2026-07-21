@@ -321,3 +321,29 @@ def test_overview_has_the_cohort_visualisations():
     assert "QEI across the cohort" in h and "stripsvg" in h     # strip plot
     assert "Check matrix" in h and 'class="carpet"' in h        # per-check carpet
     assert h.count('class="cell"') >= len(subs)                 # a cell per subject-check
+
+
+# --------------------------------------------------------------------------- #
+# server robustness (review findings S6/S15)
+# --------------------------------------------------------------------------- #
+def test_safe_back_blocks_open_redirect_and_crlf():
+    from osipy_qc.web import _safe_back
+    assert _safe_back("/subject/sub-01") == "/subject/sub-01"
+    assert _safe_back("//evil.com") == "/"          # protocol-relative open redirect
+    assert _safe_back("https://evil.com") == "/"    # absolute open redirect
+    assert _safe_back("/x\r\nSet-Cookie: y") == "/"  # CRLF response-splitting
+    assert _safe_back("") == "/"
+
+
+def test_404_is_a_styled_page_not_a_bare_tag():
+    srv, base, _ = _serve_dashboard()
+    try:
+        urllib.request.urlopen(base + "/subject/does-not-exist")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        assert e.code == 404
+        assert "charset" in body and "Back to overview" in body   # styled, has head
+    else:
+        raise AssertionError("expected 404")
+    finally:
+        srv.shutdown()

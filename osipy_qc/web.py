@@ -290,8 +290,45 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> str:
         return render_html(report, inputs=inputs, cfg=cfg, title=title)
 
 
+def _safe_back(raw: str) -> str:
+    """Sanitise a user-supplied redirect target. Only a local, single-slash-rooted
+    path is allowed — never an absolute URL (open redirect) and never one carrying
+    CR/LF (HTTP response splitting into the Location header)."""
+    if not raw or not raw.startswith("/") or raw.startswith("//"):
+        return "/"
+    if any(c in raw for c in "\r\n"):
+        return "/"
+    return raw
+
+
+def _error_page(code: int, msg: str) -> str:
+    """A styled, self-contained error page (charset + head), not a bare <h1>."""
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{code}</title><style>{BASE_CSS}</style></head><body>"
+        "<div style='max-width:560px;margin:14vh auto;padding:0 1.5rem;text-align:center'>"
+        "<div style='display:inline-flex'>" + brand("ASL quality control") + "</div>"
+        f"<h1 style='font-size:3rem;margin:1.4rem 0 .3rem'>{code}</h1>"
+        f"<p style='color:var(--muted)'>{esc(msg)}</p>"
+        "<p style='margin-top:1.4rem'><a class='btn' href='/'>Back to overview</a></p>"
+        "</div></body></html>"
+    )
+
+
 class QCHandler(http.server.BaseHTTPRequestHandler):
     server_version = "osipy-qc"
+    timeout = 60                    # drop a stalled/slow-loris connection
+
+    def _host_ok(self) -> bool:
+        """Reject cross-origin Host headers when bound to loopback (DNS-rebinding
+        defence). If the operator explicitly bound a non-loopback address, don't
+        second-guess them."""
+        bound = self.server.server_address[0]
+        if bound not in ("127.0.0.1", "::1", "localhost"):
+            return True
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        return host in ("127.0.0.1", "localhost", "::1", "")
 
     def log_message(self, fmt, *args):          # quieter than the noisy default
         print(f"  {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}")
@@ -330,39 +367,49 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         import urllib.parse as up
 
-        batch = getattr(self.server, "batch", None)     # set in dashboard mode
-        parsed = up.urlparse(self.path)
-        path, query = parsed.path, up.parse_qs(parsed.query)
-
-        # apply a config change, then bounce back to where the user was
-        if batch and path == "/apply":
-            batch["overrides"] = {k: v[0] for k, v in query.items() if k != "back"}
-            self._redirect(query.get("back", ["/"])[0])
+        if not self._host_ok():
+            self._send(_error_page(403, "Cross-origin request refused."), 403)
             return
+        try:
+            batch = getattr(self.server, "batch", None)     # set in dashboard mode
+            parsed = up.urlparse(self.path)
+            path, query = parsed.path, up.parse_qs(parsed.query)
 
-        if batch and path in ("/", "/index.html"):
-            from .dashboard_html import render_overview
-            subjects, summary, cfg = self._effective(batch)
-            self._send(render_overview(subjects, summary, cfg, batch["dataset"],
-                                       overrides=batch.get("overrides") or {}))
-        elif batch and path.startswith("/subject/"):
-            from .dashboard_html import render_subject
-            subjects, _summary, cfg = self._effective(batch)
-            sid = path[len("/subject/"):]
-            sub = next((s for s in subjects if s.sid == sid), None)
-            if sub is None:
-                self._send("<h1>404</h1><p><a href='/'>Back to overview</a></p>", 404)
+            # apply a config change, then bounce back to where the user was
+            if batch and path == "/apply":
+                batch["overrides"] = {k: v[0] for k, v in query.items() if k != "back"}
+                self._redirect(_safe_back(query.get("back", ["/"])[0]))
+                return
+
+            if batch and path in ("/", "/index.html"):
+                from .dashboard_html import render_overview
+                subjects, summary, cfg = self._effective(batch)
+                self._send(render_overview(subjects, summary, cfg, batch["dataset"],
+                                           overrides=batch.get("overrides") or {}))
+            elif batch and path.startswith("/subject/"):
+                from .dashboard_html import render_subject
+                subjects, _summary, cfg = self._effective(batch)
+                sid = up.unquote(path[len("/subject/"):])
+                sub = next((s for s in subjects if s.sid == sid), None)
+                if sub is None:
+                    self._send(_error_page(404, f"No subject {sid!r} in this cohort."), 404)
+                else:
+                    self._send(render_subject(subjects, sub, cfg,
+                                              overrides=batch.get("overrides") or {}))
+            elif path in ("/", "/index.html", "/upload"):
+                self._send(_upload_page())
             else:
-                self._send(render_subject(subjects, sub, cfg,
-                                          overrides=batch.get("overrides") or {}))
-        elif path in ("/", "/index.html", "/upload"):
-            self._send(_upload_page())
-        else:
-            self._send("<h1>404</h1><p><a href='/'>Start over</a></p>", 404)
+                self._send(_error_page(404, "That page does not exist."), 404)
+        except Exception as exc:            # a render error must not leak a traceback
+            traceback.print_exc()
+            self._send(_error_page(500, f"{type(exc).__name__}: {exc}"), 500)
 
     def do_POST(self):
+        if not self._host_ok():
+            self._send(_error_page(403, "Cross-origin request refused."), 403)
+            return
         if self.path != "/run":
-            self._send("<h1>404</h1>", 404)
+            self._send(_error_page(404, "That page does not exist."), 404)
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)
