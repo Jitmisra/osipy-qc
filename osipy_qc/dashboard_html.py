@@ -147,10 +147,12 @@ body{display:flex;min-height:100vh}
   border:1px solid #EFDBCC;padding:.28rem .6rem;border-radius:100px}
 
 /* lightbox */
-#lb{position:fixed;inset:0;background:rgba(20,18,16,.92);z-index:60;display:none;place-items:center;padding:2.5rem;cursor:zoom-out}
+#lb{position:fixed;inset:0;background:rgba(20,18,16,.93);z-index:60;display:none;place-items:center;padding:2vw;cursor:zoom-out}
 #lb.open{display:grid}
-#lb>*{max-width:95vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-#lb svg,#lb img{width:auto;height:auto;background:#0c0b0a}
+/* enlarge to fill the viewport (SVG plots are vector -> crisp at any size),
+   capped by both dimensions so the aspect ratio is preserved. */
+#lb>*{width:min(1300px,96vw);height:auto;max-width:96vw;max-height:94vh;
+  border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.55);background:#0c0b0a;padding:14px}
 .content figure img,.content figure svg{cursor:zoom-in}
 """
 
