@@ -16,7 +16,7 @@ Server-rendered pages; styling from the shared design system (_webassets).
 from __future__ import annotations
 
 from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
-from .batch import TUNABLE, BatchSummary, Subject
+from .batch import TUNABLE_GROUPS, BatchSummary, Subject
 from .core.config import POPULATIONS, QCConfig
 from .report_html import REPORT_CSS, report_body
 
@@ -56,7 +56,7 @@ body{display:flex;min-height:100vh}
 .btn-sm{font-size:.82rem;padding:.42rem .8rem;border-radius:9px;font-weight:600}
 .crumb{font-size:.85rem;color:var(--muted);margin:0 0 1rem;font-family:var(--mono)}
 .crumb a{color:var(--muted)} .crumb b{color:var(--accent-600)}
-.content{padding:1.5rem 1.8rem 3.5rem;max-width:1220px}
+.content{padding:1.5rem 2rem 3.5rem;max-width:1600px}
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.4rem}
 .page-h{margin:.1rem 0 .25rem;font-size:1.9rem;font-weight:740;letter-spacing:-.02em}
 .page-sub{color:var(--muted);margin:0;font-size:.92rem}
@@ -108,18 +108,23 @@ body{display:flex;min-height:100vh}
 .content .hero{margin-top:0}
 
 /* threshold drawer */
-.drawer{position:fixed;top:0;right:0;height:100vh;width:340px;max-width:92vw;background:var(--surface);
+.drawer{position:fixed;top:0;right:0;height:100vh;width:390px;max-width:94vw;background:var(--surface);
   border-left:1px solid var(--line);box-shadow:var(--shadow-lg);z-index:20;transform:translateX(100%);
   transition:transform .22s ease;overflow-y:auto;padding:1.3rem 1.3rem 2.5rem}
 .drawer.open{transform:translateX(0)}
 .drawer h3{font-size:1.05rem;margin-bottom:.2rem}
 .drawer .d-sub{color:var(--muted);font-size:.82rem;margin:0 0 1.1rem}
-.drawer label{display:block;font-size:.76rem;font-family:var(--mono);letter-spacing:.03em;text-transform:uppercase;
+.drawer label{display:block;font-size:.74rem;font-family:var(--mono);letter-spacing:.03em;text-transform:uppercase;
   color:var(--muted);margin:.9rem 0 .3rem}
-.drawer input[type=number],.drawer select{width:100%;padding:.55rem .6rem;border:1px solid var(--line);
-  border-radius:9px;background:var(--paper);font-family:var(--mono);font-size:.9rem}
-.drawer .two{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-.drawer .chk{display:flex;align-items:center;gap:.5rem;margin-top:1rem;font-size:.88rem;color:var(--ink);font-family:var(--sans);text-transform:none;letter-spacing:0}
+.drawer input[type=number],.drawer select{width:100%;padding:.5rem .55rem;border:1px solid var(--line);
+  border-radius:9px;background:var(--paper);font-family:var(--mono);font-size:.88rem}
+.drawer .grp{margin-top:1.15rem}
+.drawer .grp-h{display:flex;align-items:center;gap:.5rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--accent-600);font-weight:700;margin-bottom:.5rem}
+.drawer .grp-h::after{content:"";flex:1;height:1px;background:var(--line)}
+.drawer .two{display:grid;grid-template-columns:1fr 1fr;gap:.15rem .6rem}
+.drawer .f label{margin:.35rem 0 .25rem}
+.drawer .chk{display:flex;align-items:center;gap:.5rem;margin-top:1.15rem;font-size:.88rem;color:var(--ink);font-family:var(--sans);text-transform:none;letter-spacing:0}
 .drawer .actions{display:flex;gap:.6rem;margin-top:1.5rem}
 .drawer .actions .btn-primary{flex:1}
 .d-close{position:absolute;top:1rem;right:1.1rem;border:0;background:none;font-size:1.3rem;color:var(--faint);cursor:pointer;line-height:1}
@@ -188,25 +193,26 @@ def _config_drawer(cfg: QCConfig, back: str) -> str:
     pop_opts = "".join(
         f'<option value="{p}"{" selected" if p == cfg.population else ""}>{p.replace("_"," ")}</option>'
         for p in pops)
-    fields = []
-    for name, label in TUNABLE.items():
+
+    def cell(name: str, label: str) -> str:
         val = getattr(cfg, name)
-        fields.append(f'<label>{esc(label)}</label>'
-                      f'<input type="number" step="any" name="{name}" value="{val}">')
-    # lay the numeric fields two-up
-    grid = "".join(f'<div>{fields[i]}{fields[i+1]}</div>'
-                   if i + 1 < len(fields) else f'<div>{fields[i]}</div>'
-                   for i in range(0, len(fields), 2))
+        return (f'<div class="f"><label>{esc(label)}</label>'
+                f'<input type="number" step="any" name="{name}" value="{val}"></div>')
+
+    groups = "".join(
+        f'<div class="grp"><div class="grp-h">{esc(title)}</div>'
+        f'<div class="two">{"".join(cell(n, lab) for n, lab in fields)}</div></div>'
+        for title, fields in TUNABLE_GROUPS)
     return (
         f'<div class="scrim" id="scrim" onclick="closeCfg()"></div>'
         f'<form class="drawer" id="drawer" method="get" action="/apply">'
         f'<button type="button" class="d-close" onclick="closeCfg()" aria-label="close">&times;</button>'
         '<h3>Thresholds</h3>'
-        '<p class="d-sub">Adjust the grading thresholds and re-grade the whole cohort. '
-        'Uncalibrated defaults &mdash; tune to your population.</p>'
+        '<p class="d-sub">Every cutoff that grades the CBF-map checks. Pick a population to '
+        'reset the CBF bands, then fine-tune. Re-grades the whole cohort live.</p>'
         f'<input type="hidden" name="back" value="{esc(back)}">'
         f'<label>Population</label><select name="population">{pop_opts}</select>'
-        f'<div class="two" style="margin-top:.2rem">{grid}</div>'
+        f'{groups}'
         f'<label class="chk"><input type="checkbox" name="strict" value="on"'
         f'{" checked" if cfg.strict else ""}> strict &mdash; uncalibrated checks may FAIL</label>'
         '<div class="actions"><button type="submit" class="btn btn-primary">Apply &amp; re-grade</button>'

@@ -24,14 +24,38 @@ from .core.config import POPULATIONS, QCConfig, for_population
 from .core.result import Verdict
 from .report import QCReport, run_qc
 
-# Thresholds the frontend config panel is allowed to tune (name -> label). Kept
-# to a safe, meaningful subset - not every internal constant.
-TUNABLE: dict[str, str] = {
-    "qei_pass": "QEI pass", "qei_warn": "QEI cutoff",
-    "gm_cbf_lo": "GM CBF min", "gm_cbf_hi": "GM CBF max",
-    "scov_vascular": "sCoV vascular", "scov_artifact": "sCoV artifact",
-    "ratio_pass": "GM/WM ratio pass",
-}
+# Thresholds the frontend config panel exposes, grouped by module. This is
+# EVERY threshold that grades the CBF-map (Stream B) checks the dashboard runs -
+# so tuning any of them visibly moves a verdict. Labels are short because the
+# group header carries the context ("min" under "GM CBF band").
+#
+# Three kinds of field are deliberately NOT here, because they are not grading
+# knobs and exposing them would mislead:
+#   * the QEI curve constants qei_a..qei_f - these are the FITTED QEI model
+#     (byte-faithful to ASLPrep). They are not pass/fail cutoffs; changing them
+#     silently de-calibrates the published 0.5 threshold.
+#   * acquisition facts (labeling_efficiency, label/PLD, t1_blood, t1_tissue) -
+#     these are per-scan metadata the QC layer is TOLD, not thresholds. They
+#     belong on the upload form, not a cohort threshold panel.
+#   * raw-data-stream thresholds (motion FD, M0 TR, coregistration Dice) - those
+#     checks do not run on a folder of CBF maps, so a knob here would do nothing.
+TUNABLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("QEI", [("qei_pass", "pass"), ("qei_warn", "cutoff"),
+             ("tissue_thresh", "tissue prob"), ("smooth_fwhm_mm", "smooth mm")]),
+    ("Spatial CoV", [("scov_vascular", "vascular"), ("scov_artifact", "artifact")]),
+    ("GM CBF band", [("gm_cbf_lo", "min"), ("gm_cbf_hi", "max"),
+                     ("gm_cbf_fail_lo", "fail-low"), ("gm_cbf_fail_hi", "fail-high")]),
+    ("WM CBF band", [("wm_cbf_lo", "min"), ("wm_cbf_hi", "max"),
+                     ("wm_cbf_fail_lo", "fail-low"), ("wm_cbf_fail_hi", "fail-high")]),
+    ("GM/WM ratio", [("ratio_pass", "pass"), ("ratio_min", "min")]),
+    ("Negative CBF", [("neg_gm_warn", "warn frac"), ("neg_gm_fail", "fail frac")]),
+    ("Deep GM (neonatal)", [("deep_gm_ratio_lo", "min"), ("deep_gm_ratio_hi", "max")]),
+    ("Coverage", [("coverage_warn", "warn"), ("coverage_fail", "fail")]),
+]
+
+# Flat {name: label} view, derived from the groups - the allow-list that
+# cfg_from_params tunes and the drawer renders.
+TUNABLE: dict[str, str] = {n: lab for _, fields in TUNABLE_GROUPS for n, lab in fields}
 
 # Map a check id to a short human name for the ledger / artifact breakdown.
 CHECK_LABELS: dict[str, str] = {
