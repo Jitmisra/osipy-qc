@@ -54,13 +54,15 @@ def test_encode_png_rejects_wrong_shape():
 # --------------------------------------------------------------------------- #
 # Colour mapping
 # --------------------------------------------------------------------------- #
-def test_negative_voxels_are_painted_blue_not_hidden():
-    """Negative CBF is physically impossible; the report must show it, not clip
-    it into the bottom of the colour ramp."""
+def test_negative_voxels_are_painted_a_distinct_colour_not_hidden():
+    """Negative CBF is physically impossible; the report must show it in the
+    dedicated negative colour, not clip it into the bottom of the ramp."""
+    from osipy_qc.utils.imaging import _NEG
+
     sl = np.array([[-5.0, 50.0]])
     rgb = colorise(sl, vmin=0, vmax=100)
-    assert tuple(rgb[0, 0]) == (60, 120, 220)      # the dedicated negative blue
-    assert tuple(rgb[0, 1]) != (60, 120, 220)
+    assert tuple(rgb[0, 0]) == _NEG                # the dedicated negative colour
+    assert tuple(rgb[0, 1]) != _NEG                # a positive value uses the ramp
 
 
 def test_slice_mosaic_shape_and_type():

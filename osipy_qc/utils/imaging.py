@@ -67,12 +67,18 @@ def _lerp(stops: list[tuple[float, tuple[int, int, int]]], t: np.ndarray) -> np.
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-# A perfusion-style warm ramp (black -> red -> orange -> yellow -> white).
-_HOT = [(0.0, (0, 0, 0)), (0.35, (150, 25, 10)), (0.6, (230, 110, 20)),
-        (0.85, (250, 210, 60)), (1.0, (255, 255, 255))]
-# Blue for negative values: physically impossible CBF should be *visible*, not
-# silently clipped to black.
-_NEG = (60, 120, 220)
+# The perfusion colormap. This is an "inferno"-style perceptually-uniform ramp
+# (black -> deep violet -> magenta -> red -> orange -> yellow), the modern
+# standard for scientific/medical imaging: it reads cleanly at every intensity
+# and does not muddy into a single flat red the way a naive hot ramp does.
+_HOT = [
+    (0.00, (0, 0, 4)),      (0.13, (31, 12, 72)),   (0.25, (85, 15, 109)),
+    (0.38, (136, 34, 106)), (0.50, (186, 54, 85)),  (0.63, (227, 89, 51)),
+    (0.75, (249, 140, 10)), (0.88, (249, 201, 50)), (1.00, (252, 255, 164)),
+]
+# A cool cyan for negative values: physically impossible CBF must be *visible*
+# against the warm ramp, not lost in the dark low end.
+_NEG = (60, 200, 230)
 
 
 def colorise(slice2d: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
