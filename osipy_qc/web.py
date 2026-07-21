@@ -304,27 +304,61 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _redirect(self, location: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def _effective(self, batch: dict):
+        """(subjects, summary, cfg) for the currently applied overrides, memoised
+        so images are only re-rendered when the config actually changes."""
+        import urllib.parse as up
+
+        from .batch import cfg_from_params, regrade, summarise
+
+        overrides = batch.get("overrides") or {}
+        key = tuple(sorted(overrides.items()))
+        cache = batch.get("_cache")
+        if cache and cache[0] == key:
+            return cache[1]
+        cfg = cfg_from_params(batch["base_cfg"], dict(overrides))
+        subjects = regrade(batch["base_subjects"], cfg) if overrides else batch["base_subjects"]
+        result = (subjects, summarise(subjects), cfg)
+        batch["_cache"] = (key, result)
+        return result
+
     def do_GET(self):
+        import urllib.parse as up
+
         batch = getattr(self.server, "batch", None)     # set in dashboard mode
-        path = self.path.split("?", 1)[0]
+        parsed = up.urlparse(self.path)
+        path, query = parsed.path, up.parse_qs(parsed.query)
+
+        # apply a config change, then bounce back to where the user was
+        if batch and path == "/apply":
+            batch["overrides"] = {k: v[0] for k, v in query.items() if k != "back"}
+            self._redirect(query.get("back", ["/"])[0])
+            return
 
         if batch and path in ("/", "/index.html"):
             from .dashboard_html import render_overview
-            self._send(render_overview(batch["subjects"], batch["summary"],
-                                       batch["cfg"], batch["dataset"]))
+            subjects, summary, cfg = self._effective(batch)
+            self._send(render_overview(subjects, summary, cfg, batch["dataset"],
+                                       overrides=batch.get("overrides") or {}))
         elif batch and path.startswith("/subject/"):
             from .dashboard_html import render_subject
+            subjects, _summary, cfg = self._effective(batch)
             sid = path[len("/subject/"):]
-            sub = next((s for s in batch["subjects"] if s.sid == sid), None)
+            sub = next((s for s in subjects if s.sid == sid), None)
             if sub is None:
                 self._send("<h1>404</h1><p><a href='/'>Back to overview</a></p>", 404)
             else:
-                self._send(render_subject(batch["subjects"], sub, batch["cfg"]))
+                self._send(render_subject(subjects, sub, cfg,
+                                          overrides=batch.get("overrides") or {}))
         elif path in ("/", "/index.html", "/upload"):
             self._send(_upload_page())
         else:
-            dest = "/" if batch else "/"
-            self._send(f"<h1>404</h1><p><a href='{dest}'>Start over</a></p>", 404)
+            self._send("<h1>404</h1><p><a href='/'>Start over</a></p>", 404)
 
     def do_POST(self):
         if self.path != "/run":
@@ -382,7 +416,7 @@ def serve_dashboard(subjects, cfg=None, dataset: str = "cohort",
 
     cfg = cfg or QCConfig()
     with _Server((host, port), QCHandler) as httpd:
-        httpd.batch = {"subjects": subjects, "summary": summarise(subjects),
-                       "cfg": cfg, "dataset": dataset}
+        httpd.batch = {"base_subjects": subjects, "base_cfg": cfg,
+                       "dataset": dataset, "overrides": {}, "_cache": None}
         _run(httpd, f"http://{host}:{port}/",
              f"osipy-qc dashboard running ({len(subjects)} subjects) at", open_browser)

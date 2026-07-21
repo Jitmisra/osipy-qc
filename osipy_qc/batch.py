@@ -18,11 +18,20 @@ from __future__ import annotations
 
 import glob
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from .core.config import QCConfig
+from .core.config import POPULATIONS, QCConfig, for_population
 from .core.result import Verdict
 from .report import QCReport, run_qc
+
+# Thresholds the frontend config panel is allowed to tune (name -> label). Kept
+# to a safe, meaningful subset - not every internal constant.
+TUNABLE: dict[str, str] = {
+    "qei_pass": "QEI pass", "qei_warn": "QEI cutoff",
+    "gm_cbf_lo": "GM CBF min", "gm_cbf_hi": "GM CBF max",
+    "scov_vascular": "sCoV vascular", "scov_artifact": "sCoV artifact",
+    "ratio_pass": "GM/WM ratio pass",
+}
 
 # Map a check id to a short human name for the ledger / artifact breakdown.
 CHECK_LABELS: dict[str, str] = {
@@ -191,6 +200,38 @@ class BatchSummary:
     @property
     def fail_rate(self) -> float:
         return self.rates.get("FAIL", 0.0)
+
+
+def cfg_from_params(base: QCConfig, params: dict) -> QCConfig:
+    """Build an effective config from the base config plus frontend overrides.
+
+    `params` is a flat {name: str} map (query string). Population resets the CBF
+    bands, then any tunable threshold override is applied on top. Unknown or
+    unparseable values are ignored rather than raising, so a hand-edited URL can
+    never take the server down."""
+    pop = params.get("population")
+    cfg = for_population(pop) if pop in POPULATIONS else replace(base)
+    kw: dict = {}
+    for name in TUNABLE:
+        if params.get(name) not in (None, ""):
+            try:
+                kw[name] = float(params[name])
+            except (TypeError, ValueError):
+                pass
+    strict = params.get("strict")
+    if strict is not None:
+        kw["strict"] = strict in ("on", "1", "true", "True")
+    return replace(cfg, **kw)
+
+
+def regrade(subjects: list[Subject], cfg: QCConfig,
+            checks: list[str] | None = None) -> list[Subject]:
+    """Re-grade already-loaded subjects with a new config, reusing their inputs
+    (no disk I/O). This is what makes the frontend threshold panel live."""
+    if checks is None:
+        checks = cbf_map_checks()
+    return [Subject(sid=s.sid, report=run_qc(s.inputs, cfg=cfg, checks=checks),
+                    inputs=s.inputs, cfg=cfg) for s in subjects]
 
 
 def summarise(subjects: list[Subject]) -> BatchSummary:

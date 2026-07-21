@@ -139,12 +139,10 @@ def test_subject_page_escapes_and_stays_local():
 # the dashboard server, over real HTTP
 # --------------------------------------------------------------------------- #
 def _serve_dashboard():
-    from osipy_qc.batch import summarise as _sum
-
     subs = demo_cohort(14)
     srv = _Server(("127.0.0.1", 0), QCHandler)
-    srv.batch = {"subjects": subs, "summary": _sum(subs),
-                 "cfg": QCConfig(), "dataset": "demo"}
+    srv.batch = {"base_subjects": subs, "base_cfg": QCConfig(),
+                 "dataset": "demo", "overrides": {}, "_cache": None}
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     time.sleep(0.2)
     return srv, f"http://127.0.0.1:{srv.server_address[1]}", subs
@@ -178,3 +176,57 @@ def test_server_404s_unknown_subject():
         raise AssertionError("expected 404 for an unknown subject")
     finally:
         srv.shutdown()
+
+
+# --------------------------------------------------------------------------- #
+# live threshold config
+# --------------------------------------------------------------------------- #
+def test_cfg_from_params_applies_overrides():
+    from osipy_qc.batch import cfg_from_params
+
+    base = QCConfig()
+    cfg = cfg_from_params(base, {"population": "child", "qei_pass": "0.7",
+                                 "gm_cbf_lo": "70", "strict": "on"})
+    assert cfg.population == "child"          # population resets the bands...
+    assert cfg.qei_pass == 0.7                 # ...then overrides apply on top
+    assert cfg.gm_cbf_lo == 70.0
+    assert cfg.strict is True
+
+
+def test_cfg_from_params_ignores_garbage():
+    from osipy_qc.batch import cfg_from_params
+
+    cfg = cfg_from_params(QCConfig(), {"qei_pass": "not-a-number", "bogus": "x"})
+    assert cfg.qei_pass == QCConfig().qei_pass   # bad value ignored, not fatal
+
+
+def test_regrade_changes_verdicts_without_touching_disk():
+    from osipy_qc.batch import regrade
+
+    subs = demo_cohort(8)
+    strict_pass = QCConfig(qei_pass=0.999, qei_warn=0.999)   # nothing can pass
+    re = regrade(subs, strict_pass)
+    assert all(s.overall != "PASS" for s in re)
+    assert [s.sid for s in re] == [s.sid for s in subs]
+
+
+def test_apply_route_stores_overrides_and_regrades():
+    srv, base, _ = _serve_dashboard()
+    try:
+        # apply an impossible QEI cutoff -> pass rate must drop to 0
+        opener = urllib.request.build_opener()
+        opener.open(base + "/apply?qei_warn=0.999&qei_pass=0.999&back=/")
+        body = opener.open(base + "/").read().decode()
+        assert "custom thresholds" in body          # the applied-badge shows
+        # the overview now reflects the re-grade (0% pass)
+        assert "Pass rate" in body
+    finally:
+        srv.shutdown()
+
+
+def test_overview_has_the_threshold_panel_and_lightbox():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert 'id="drawer"' in h and "Apply &amp; re-grade" in h   # config panel
+    assert 'id="lb"' in h                                        # lightbox
+    assert 'onclick="window.print()"' in h                      # export

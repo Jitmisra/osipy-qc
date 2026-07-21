@@ -31,29 +31,10 @@ import math
 
 import numpy as np
 
-from ._webassets import (BASE_CSS, PROVENANCE_COLOURS, VERDICT_COLOURS, brand,
-                         esc)
-from .core.config import QCConfig, provenance_of
+from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
+from .core.config import QCConfig
 from .utils.imaging import histogram_svg, png_data_uri, slice_mosaic
 from .utils.masks import covered_tissue_mask
-
-# Which config threshold(s) each check leans on, so the report can show the
-# provenance of the numbers behind a verdict.
-_CHECK_THRESHOLDS: dict[str, tuple[str, ...]] = {
-    "1.qei": ("qei_pass", "qei_warn", "tissue_thresh", "smooth_fwhm_mm"),
-    "2.1.spatial_cov": ("scov_vascular", "scov_artifact"),
-    "2.2.snr": ("scov_vascular",),
-    "2.3.histogram": (),
-    "3.1.cbf_level": ("gm_cbf_lo", "gm_cbf_hi", "gm_cbf_fail_lo", "gm_cbf_fail_hi",
-                      "wm_cbf_lo", "wm_cbf_hi"),
-    "3.2.gm_wm_ratio": ("ratio_pass", "ratio_min"),
-    "3.3.negative_gm": ("neg_gm_warn", "neg_gm_fail"),
-    "3.4.deep_gm_ratio": ("deep_gm_ratio_lo", "deep_gm_ratio_hi"),
-    "4.1.coregistration": ("dice_pass", "dice_warn"),
-    "4.2.coverage": ("coverage_warn", "coverage_fail"),
-    "6.2.m0_tr": ("m0_tr_min_s",),
-    "7.1.motion": ("fd_mean_fail_mm", "fd_frame_censor_mm"),
-}
 
 # One-line plain-English gloss per overall verdict, shown in the hero.
 _OVERALL_GLOSS = {
@@ -302,26 +283,8 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# provenance + check cards
+# check cards
 # --------------------------------------------------------------------------- #
-def _provenance_block(check: str) -> str:
-    fields = _CHECK_THRESHOLDS.get(check, ())
-    if not fields:
-        return ""
-    cfg = QCConfig()
-    rows = []
-    for f in fields:
-        level, citation, _note = provenance_of(f)
-        label, colour = PROVENANCE_COLOURS[level.value]
-        value = getattr(cfg, f, "?")
-        src = "no published source" if citation == "NONE" else citation
-        rows.append(
-            f'<div class="row"><span class="badge" style="background:{colour}">{label}</span> '
-            f'<code>{esc(f)} = {esc(value)}</code> &mdash; {esc(src)}</div>'
-        )
-    return '<div class="prov">' + "".join(rows) + "</div>"
-
-
 def _check_card(res: dict) -> str:
     verdict = res["verdict"]
     fg, _bg = VERDICT_COLOURS.get(verdict, ("#8A8079", ""))
@@ -329,11 +292,10 @@ def _check_card(res: dict) -> str:
     rows = "".join(
         f"<tr><td>{esc(k)}</td><td>{esc(_fmt(v))}</td></tr>" for k, v in metric.items()
     )
-    prov = _provenance_block(res["check"])
     details = ""
-    if rows or prov:
-        inner = (f'<div class="scroll"><table class="mtable">{rows}</table></div>' if rows else "") + prov
-        details = f"<details><summary>details</summary>{inner}</details>"
+    if rows:
+        details = (f'<details><summary>details</summary>'
+                   f'<div class="scroll"><table class="mtable">{rows}</table></div></details>')
     return (
         f'<div class="card check"><div class="rail" style="background:{fg}"></div>'
         f'<div class="body"><div class="head">'
