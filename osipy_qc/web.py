@@ -37,6 +37,7 @@ import tempfile
 import traceback
 import webbrowser
 
+from ._webassets import BASE_CSS, LOGO_SVG, esc
 from .core.config import POPULATIONS, for_population
 from .report import run_qc
 from .report_html import render_html
@@ -44,78 +45,176 @@ from .report_html import render_html
 # Refuse absurd uploads outright rather than trying to parse them.
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024      # 512 MB across all files in one request
 
-_PAGE_CSS = """
-:root{--paper:#fff;--warm:#FDF9F5;--ink:#241C15;--soft:#6B5D4F;--line:#EDE2D5;--accent:#C2571A;}
-*{box-sizing:border-box}
-body{margin:0;background:var(--warm);color:var(--ink);
-     font-family:ui-serif,"Iowan Old Style",Georgia,serif;line-height:1.55}
-.wrap{max-width:640px;margin:0 auto;padding:3rem 1.25rem}
-h1{font-size:1.8rem;margin:0 0 .3rem}
-.sub{color:var(--soft);margin:0 0 2rem}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-form{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:1.5rem}
-label{display:block;font-size:.82rem;font-family:ui-monospace,Menlo,monospace;
-      letter-spacing:.04em;text-transform:uppercase;color:var(--soft);margin:1.1rem 0 .3rem}
-label:first-of-type{margin-top:0}
-input[type=file],select{width:100%;padding:.6rem;border:1px solid var(--line);
-      border-radius:4px;background:var(--warm);font-family:inherit;font-size:.95rem}
-.req{color:var(--accent)}
-.hint{font-size:.78rem;color:var(--soft);margin:.25rem 0 0}
-button{margin-top:1.6rem;width:100%;padding:.8rem;border:0;border-radius:4px;
-       background:var(--accent);color:#fff;font-size:1rem;font-weight:600;cursor:pointer;
-       font-family:inherit}
-button:hover{filter:brightness(1.08)}
-button:disabled{opacity:.6;cursor:progress}
-.note{background:#FBE4D0;border-left:3px solid var(--accent);padding:.8rem 1rem;
-      border-radius:0 4px 4px 0;font-size:.86rem;margin:1.5rem 0 0}
-.err{background:#fdecea;border-left:3px solid #C0392B;padding:.8rem 1rem;
-     border-radius:0 4px 4px 0;font-size:.9rem;margin-bottom:1.5rem}
-a{color:var(--accent)}
+# youngest -> oldest, for the segmented population control, with short display
+# labels so nothing clips in the chips (the group heading already says "Population")
+_POP_ORDER = ["neonate_preterm", "neonate_term", "infant", "child",
+              "adolescent", "adult", "elderly"]
+_POP_LABELS = {
+    "neonate_preterm": "preterm", "neonate_term": "neonate", "infant": "infant",
+    "child": "child", "adolescent": "teen", "adult": "adult", "elderly": "elderly",
+}
+
+_CONSOLE_CSS = """
+.stage{max-width:760px;margin:0 auto;padding:1rem 1.5rem 4rem}
+.lede{text-align:center;margin:1.5rem 0 2rem}
+.lede h1{font-size:clamp(1.9rem,5vw,2.7rem);font-weight:730;margin:.6rem 0 .4rem}
+.lede p{color:var(--muted);font-size:1.05rem;max-width:48ch;margin:0 auto}
+.err{max-width:640px;margin:0 auto 1.4rem;background:#FBE4E0;border:1px solid #F1C7C0;
+  border-left:3px solid var(--fail);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  padding:.8rem 1rem;font-size:.9rem;color:#7a2a20}
+form{margin-top:.5rem}
+.field-label{display:flex;align-items:baseline;gap:.5rem;margin:1.4rem 0 .5rem;font-weight:600}
+.field-label .req{font-family:var(--mono);font-size:.66rem;color:var(--accent-600);
+  background:var(--accent-050);padding:.1rem .4rem;border-radius:5px;letter-spacing:.03em}
+.field-label .opt{font-family:var(--mono);font-size:.66rem;color:var(--faint)}
+.drop{position:relative;display:flex;align-items:center;gap:.9rem;padding:1.1rem 1.2rem;
+  border:1.5px dashed var(--line);border-radius:var(--radius);background:var(--surface);
+  cursor:pointer;transition:.15s ease}
+.drop:hover{border-color:var(--accent);background:#FFFDFB}
+.drop.drag{border-color:var(--accent);background:var(--accent-050)}
+.drop.filled{border-style:solid;border-color:#CFE7D8;background:#F4FBF7}
+.drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop .ic{width:38px;height:38px;border-radius:10px;background:var(--well);flex:none;
+  display:grid;place-items:center;color:var(--accent-600)}
+.drop.filled .ic{background:#E1F3E9;color:var(--pass)}
+.drop .txt{flex:1;min-width:0}
+.drop .txt b{font-size:.94rem}
+.drop .txt small{display:block;color:var(--muted);font-size:.8rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.drop .clear{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:0;background:none;
+  cursor:pointer;padding:.2rem .4rem;display:none;z-index:2}
+.drop.filled .clear{display:inline}
+.tissue-grid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+@media (max-width:560px){.tissue-grid{grid-template-columns:1fr}}
+.tissue-grid .drop{padding:.85rem 1rem}
+.tissue-grid .ic{width:30px;height:30px}
+.seg{display:flex;flex-wrap:wrap;gap:.4rem}
+.seg label{flex:1;min-width:86px;position:relative}
+.seg input{position:absolute;opacity:0;width:0;height:0}
+.seg span{display:block;text-align:center;padding:.5rem .3rem;border:1px solid var(--line);
+  border-radius:9px;background:var(--surface);cursor:pointer;font-size:.8rem;
+  font-family:var(--mono);color:var(--muted);transition:.12s ease;white-space:nowrap}
+.seg span:hover{border-color:var(--faint)}
+.seg input:checked + span{background:var(--accent);border-color:var(--accent);color:#fff;
+  box-shadow:0 6px 14px -8px rgba(232,89,12,.7)}
+.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+.submit-row{margin-top:1.8rem}
+.submit-row .btn-primary{width:100%;padding:.9rem;font-size:1.02rem}
+.hint{font-size:.82rem;color:var(--muted);margin:.4rem 0 0}
+#overlay{position:fixed;inset:0;background:rgba(251,247,241,.86);backdrop-filter:blur(3px);
+  display:none;place-items:center;z-index:50}
+#overlay.on{display:grid}
+.spin{width:42px;height:42px;border:4px solid var(--accent-050);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;margin:0 auto .9rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+#overlay .msg{text-align:center;color:var(--muted);font-family:var(--mono);font-size:.85rem}
 """
+
+_FILE_IC = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>'
+            '<polyline points="13 2 13 9 20 9"/></svg>')
+
+
+def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
+    req = " required" if required else ""
+    return (
+        f'<div class="drop" data-field="{field}">'
+        f'<div class="ic">{_FILE_IC}</div>'
+        f'<div class="txt"><b>{esc(title)}</b><small data-hint>{esc(hint)}</small></div>'
+        f'<button type="button" class="clear" aria-label="remove">clear</button>'
+        f'<input type="file" name="{field}" accept=".nii,.gz"{req}></div>'
+    )
 
 
 def _upload_page(error: str = "") -> str:
-    opts = "".join(
-        f'<option value="{p}"{" selected" if p == "adult" else ""}>{p}</option>'
-        for p in sorted(POPULATIONS)
+    pops = [p for p in _POP_ORDER if p in POPULATIONS]
+    seg = "".join(
+        f'<label><input type="radio" name="population" value="{p}"'
+        f'{" checked" if p == "adult" else ""}>'
+        f'<span title="{p}">{esc(_POP_LABELS.get(p, p))}</span></label>'
+        for p in pops
     )
-    err = f'<div class="err"><b>Could not grade that.</b><br>{error}</div>' if error else ""
+    err = f'<div class="err"><b>Could not grade that.</b> {esc(error)}</div>' if error else ""
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>osipy-qc</title><style>{_PAGE_CSS}</style></head><body><div class="wrap">
-<h1>ASL Quality Control</h1>
-<p class="sub">Upload a CBF map and get a PASS / WARN / FAIL report, with reasons.</p>
-{err}
-<form method="post" action="/run" enctype="multipart/form-data"
-      onsubmit="this.querySelector('button').disabled=true;
-                this.querySelector('button').textContent='Grading\\u2026';">
+<title>osipy-qc &mdash; ASL quality control</title>
+<style>{BASE_CSS}{_CONSOLE_CSS}</style></head><body>
+<div class="topbar"><div class="brand">{LOGO_SVG}<b>osipy-qc</b>
+  <span>ASL quality control</span></div></div>
 
-  <label for="cbf">CBF map <span class="req">*required</span></label>
-  <input id="cbf" type="file" name="cbf" accept=".nii,.gz" required>
-  <p class="hint">The quantified CBF map (mL/100g/min), NIfTI.</p>
+<div class="stage">
+  <div class="lede">
+    <div class="eyebrow">CBF map &rarr; PASS / WARN / FAIL</div>
+    <h1>Grade an ASL scan</h1>
+    <p>Drop in a CBF map and get an interpretable quality report &mdash; a verdict per
+       check, with the reason and the reference behind every number.</p>
+  </div>
+  {err}
+  <form id="qc" method="post" action="/run" enctype="multipart/form-data">
+    <div class="field-label">CBF map <span class="req">required</span></div>
+    {_dropzone("cbf", "Choose or drop a CBF map", "quantified CBF (mL/100g/min), NIfTI", required=True)}
 
-  <label for="gm">Grey-matter map</label>
-  <input id="gm" type="file" name="gm" accept=".nii,.gz">
-  <label for="wm">White-matter map</label>
-  <input id="wm" type="file" name="wm" accept=".nii,.gz">
-  <label for="csf">CSF map</label>
-  <input id="csf" type="file" name="csf" accept=".nii,.gz">
-  <p class="hint">Tissue probability maps, <b>on the same voxel grid as the CBF map</b>.
-     Without GM/WM the QEI and the level checks cannot run and will report UNKNOWN.
-     CSF is derived as 1&minus;GM&minus;WM if you leave it out.</p>
+    <div class="field-label">Tissue maps <span class="opt">optional &mdash; needed for QEI &amp; level checks</span></div>
+    <div class="tissue-grid">
+      {_dropzone("gm", "Grey matter", "GM probability map")}
+      {_dropzone("wm", "White matter", "WM probability map")}
+      {_dropzone("csf", "CSF", "derived if omitted")}
+      <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
+        <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
+    </div>
 
-  <label for="population">Population</label>
-  <select id="population" name="population">{opts}</select>
-  <p class="hint">CBF norms move a lot across the lifespan &mdash; a child's normal
-     GM CBF (~97) would look abnormal against adult bands, and a neonate's (~16)
-     far more so. Pick the right one.</p>
+    <div class="field-label">Population <span class="opt">CBF norms shift across the lifespan</span></div>
+    <div class="seg">{seg}</div>
+    <p class="hint">A child's normal GM CBF (~97) would look abnormal against adult bands;
+       a neonate's (~16) far more so.</p>
 
-  <button type="submit">Grade this scan</button>
-</form>
-<div class="note"><b>Running locally.</b> Files are graded in a temporary folder on
-this machine and deleted immediately afterwards &mdash; nothing is uploaded anywhere
-or kept. This server is meant for local use and is not hardened for public hosting.</div>
-</div></body></html>"""
+    <div class="submit-row">
+      <button type="submit" class="btn btn-primary">Grade scan &rarr;</button>
+    </div>
+  </form>
+</div>
+
+<div id="overlay"><div class="msg"><div class="spin"></div>Grading the scan&hellip;</div></div>
+
+<script>
+(function(){{
+  document.querySelectorAll('.drop[data-field]').forEach(function(dz){{
+    var input = dz.querySelector('input[type=file]');
+    var hint  = dz.querySelector('[data-hint]');
+    var base  = hint.textContent;
+    function refresh(){{
+      if(input.files && input.files.length){{
+        dz.classList.add('filled'); hint.textContent = input.files[0].name;
+      }} else {{ dz.classList.remove('filled'); hint.textContent = base; }}
+    }}
+    input.addEventListener('change', refresh);
+    ['dragenter','dragover'].forEach(function(e){{
+      dz.addEventListener(e, function(ev){{ ev.preventDefault(); dz.classList.add('drag'); }}); }});
+    ['dragleave','drop'].forEach(function(e){{
+      dz.addEventListener(e, function(ev){{ ev.preventDefault(); dz.classList.remove('drag'); }}); }});
+    dz.addEventListener('drop', function(ev){{
+      if(ev.dataTransfer && ev.dataTransfer.files.length){{ input.files = ev.dataTransfer.files; refresh(); }} }});
+    dz.querySelector('.clear').addEventListener('click', function(ev){{
+      ev.stopPropagation(); input.value=''; refresh(); }});
+  }});
+
+  // progressive enhancement: fetch + render in place with a loading overlay.
+  // With JS off, the form does a normal POST and still works.
+  var form = document.getElementById('qc');
+  var overlay = document.getElementById('overlay');
+  form.addEventListener('submit', function(ev){{
+    if(!window.fetch){{ return; }}
+    ev.preventDefault();
+    overlay.classList.add('on');
+    fetch('/run', {{method:'POST', body:new FormData(form)}})
+      .then(function(r){{ return r.text(); }})
+      .then(function(html){{ document.open(); document.write(html); document.close(); }})
+      .catch(function(){{ overlay.classList.remove('on'); form.submit(); }});
+  }});
+}})();
+</script>
+</body></html>"""
 
 
 def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, bytes]]:
