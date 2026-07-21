@@ -193,3 +193,10 @@ def test_check_cards_use_human_names_and_keep_the_id():
     r = CheckResult("1.qei", Verdict.PASS, metric={"qei": 0.8}, reason="ok")
     h = render_html(QCReport(Verdict.PASS, [r]), inputs={})
     assert ">QEI<" in h and "1.qei" in h
+
+
+def test_report_shows_acquisition_params_or_says_not_provided():
+    report, inputs = _demo_report()
+    h = render_html(report, inputs=inputs)      # no acq params supplied
+    assert "Acquisition" in h and "PLD" in h
+    assert "not provided" in h                  # honest about absent facts

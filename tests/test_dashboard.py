@@ -313,3 +313,11 @@ def test_subject_page_has_a_report_header_and_nav():
     assert "window.print()" in h               # export
     # prev/next step through the cohort
     assert h.count('href="/subject/') >= 2
+
+
+def test_overview_has_the_cohort_visualisations():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert "QEI across the cohort" in h and "stripsvg" in h     # strip plot
+    assert "Check matrix" in h and 'class="carpet"' in h        # per-check carpet
+    assert h.count('class="cell"') >= len(subs)                 # a cell per subject-check

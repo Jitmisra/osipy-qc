@@ -111,6 +111,12 @@ figcaption{font-size:.78rem;color:var(--muted);padding:.6rem .8rem;border-top:1p
 .prov .row{font-size:.76rem;color:var(--muted);line-height:1.4}
 .prov code{color:var(--ink);background:var(--well);padding:.05rem .3rem;border-radius:4px}
 .scroll{overflow-x:auto}
+
+/* acquisition chips */
+.acqrow{display:flex;gap:.5rem;flex-wrap:wrap}
+.chip.acq{font-size:.76rem}
+.chip.acq b{color:var(--ink);font-weight:650}
+.chip.acq.na b{color:var(--faint);font-weight:500}
 """
 
 
@@ -264,6 +270,29 @@ def _kpi_tiles(by: dict[str, dict], cfg: QCConfig) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# acquisition parameters
+# --------------------------------------------------------------------------- #
+def _acq_panel(cfg: QCConfig) -> str:
+    """The White-Paper QA-checklist acquisition facts. These live in the config but
+    default to None (they are absent from NIfTI headers); showing 'not provided'
+    honestly explains why quantification-dependent checks degrade."""
+    fields = [
+        ("PLD", cfg.post_labeling_delay_s, " s"),
+        ("Label duration", cfg.label_duration_s, " s"),
+        ("Labeling eff. α", cfg.labeling_efficiency, ""),
+        ("T1 blood", cfg.t1_blood_s, " s"),
+    ]
+    chips = []
+    for lab, val, unit in fields:
+        if isinstance(val, (int, float)):
+            chips.append(f'<span class="chip acq">{esc(lab)}: <b>{val:g}{esc(unit)}</b></span>')
+        else:
+            chips.append(f'<span class="chip acq na">{esc(lab)}: <b>not provided</b></span>')
+    return ('<div class="section-title">Acquisition</div>'
+            f'<div class="acqrow">{"".join(chips)}</div>')
+
+
+# --------------------------------------------------------------------------- #
 # figures
 # --------------------------------------------------------------------------- #
 def _figures(inputs: dict, cfg: QCConfig) -> str:
@@ -407,6 +436,7 @@ def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
     return (
         f'{_hero(d, cfg)}'
         f'{_kpi_tiles(_by_name(d), cfg)}'
+        f'{_acq_panel(cfg)}'
         f'{_checks_grouped(report, d)}'
         f'{_figures(inputs, cfg)}'
         f'{note}'

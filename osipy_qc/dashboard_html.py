@@ -101,6 +101,23 @@ body{display:flex;min-height:100vh}
 
 .cols{display:grid;grid-template-columns:1fr 330px;gap:1rem;align-items:start}
 @media (max-width:920px){.cols{grid-template-columns:1fr}}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;margin-top:1rem}
+@media (max-width:920px){.cols2{grid-template-columns:1fr}}
+
+/* cohort viz: QEI strip + check-matrix carpet */
+.stripsvg{width:100%;height:auto;margin-top:.3rem}
+.carpet-panel .ph{align-items:flex-start}
+.carpet-legend{display:flex;gap:.7rem;font-family:var(--mono);font-size:.6rem;color:var(--muted);flex-wrap:wrap}
+.carpet-legend .lg{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.25rem;vertical-align:middle}
+.carpet-scroll{overflow-x:auto}
+.carpet{border-collapse:separate;border-spacing:3px;font-size:.7rem}
+.carpet th.rk{text-align:right;font-weight:600;color:var(--muted);white-space:nowrap;padding-right:.4rem;font-family:var(--sans)}
+.carpet th.ck{font-family:var(--mono);font-size:.62rem;color:var(--faint);font-weight:600;
+  writing-mode:vertical-rl;transform:rotate(180deg);height:64px;vertical-align:bottom}
+.carpet th.ck a{color:var(--faint)}
+.carpet .cell{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;
+  color:#fff;font-size:.62rem;font-weight:800;text-decoration:none}
+.carpet .cell:hover{outline:2px solid var(--ink);outline-offset:1px}
 .panel{padding:1.15rem 1.25rem;border-radius:16px}
 .panel h3{font-size:1.02rem;margin-bottom:.15rem}
 .panel .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem}
@@ -519,6 +536,90 @@ def _median(xs: list[float]):
     return xs[m] if n % 2 else (xs[m - 1] + xs[m]) / 2
 
 
+def _check_carpet(subjects: list[Subject]) -> str:
+    """A checks x subjects verdict grid (the MRIQC group-report pattern). A whole
+    row lit red is a systemic acquisition problem the summary bars would hide.
+    Hand-built table, verdict colour + a redundant glyph, every cell a jump-link."""
+    from .batch import check_label
+
+    cols = _worst_first(subjects)
+    # rows = checks that ran, worst (most-flagged) first
+    flags: dict[str, int] = {}
+    lut: dict[tuple, str] = {}
+    for s in subjects:
+        for r in s.report.results:
+            flags.setdefault(r.check, 0)
+            if r.verdict.value in ("FAIL", "WARN"):
+                flags[r.check] += 1
+            lut[(s.sid, r.check)] = r.verdict.value
+    checks = sorted(flags, key=lambda c: (-flags[c], c))
+    if not checks or not cols:
+        return ""
+
+    head = '<th class="rk"></th>' + "".join(
+        f'<th class="ck"><a href="/subject/{esc(s.sid)}">{esc(s.sid)}</a></th>' for s in cols)
+    body = []
+    for check in checks:
+        cells = []
+        for s in cols:
+            v = lut.get((s.sid, check))
+            fg = VERDICT_COLOURS.get(v, ("#C9C4BD", ""))[0] if v else "#E5E0DA"
+            g = _VGLYPH.get(v, "")
+            cells.append(f'<td><a class="cell" href="/subject/{esc(s.sid)}" '
+                         f'style="background:{fg}" title="{esc(s.sid)}: {esc(v or "n/a")}">{g}</a></td>')
+        body.append(f'<tr><th class="rk">{esc(check_label(check))}</th>{"".join(cells)}</tr>')
+    legend = " ".join(
+        f'<span><span class="lg" style="background:{VERDICT_COLOURS[v][0]}"></span>{v}</span>'
+        for v in ("PASS", "WARN", "FAIL", "N/A"))
+    return ('<div class="card panel carpet-panel"><div class="ph"><h3>Check matrix</h3>'
+            f'<span class="carpet-legend">{legend}</span></div>'
+            '<p class="cap" style="color:var(--muted);margin:.1rem 0 .7rem">Every check &times; every '
+            'subject. A whole row lit up points to a systemic problem.</p>'
+            '<div class="carpet-scroll"><table class="carpet"><thead><tr>'
+            f'{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div></div>')
+
+
+def _qei_strip(subjects: list[Subject], cfg: QCConfig) -> str:
+    """A 1-D strip of every subject's QEI against the published 0.5 cutoff — the
+    most defensible cohort chart for the QEI author. A distribution, NOT a time
+    series (subjects carry no dates). Missing-QEI subjects get their own lane."""
+    W, H, padx = 560, 96, 30
+    x0, x1 = padx, W - padx
+    y = 46
+
+    def px(q):
+        return x0 + (x1 - x0) * max(0.0, min(1.0, q))
+
+    have = [s for s in subjects if isinstance(s.qei, (int, float))]
+    na = [s for s in subjects if not isinstance(s.qei, (int, float))]
+    cut = px(cfg.qei_warn)
+    parts = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" class="stripsvg" role="img">']
+    # axis
+    parts.append(f'<line x1="{x0}" y1="{y}" x2="{x1}" y2="{y}" stroke="var(--line)" stroke-width="2"/>')
+    for t in (0.0, 0.5, 1.0):
+        parts.append(f'<text x="{px(t):.0f}" y="{y+22}" text-anchor="middle" font-size="9" '
+                     f'fill="#9A938C" font-family="monospace">{t:g}</text>')
+    # cutoff line
+    parts.append(f'<line x1="{cut:.1f}" y1="18" x2="{cut:.1f}" y2="{y+6}" stroke="#A43122" '
+                 f'stroke-width="1.4" stroke-dasharray="3 2"/>'
+                 f'<text x="{cut:.1f}" y="14" text-anchor="middle" font-size="8.5" fill="#A43122" '
+                 f'font-family="monospace">cutoff {cfg.qei_warn:g}</text>')
+    # dots, jittered vertically by index parity to reduce overlap
+    for i, s in enumerate(have):
+        c = VERDICT_COLOURS.get(s.overall, ("#8A8079", ""))[0]
+        dy = (-1 if i % 2 else 1) * (3 + 2 * (i % 3))
+        parts.append(f'<circle cx="{px(s.qei):.1f}" cy="{y+dy}" r="5.5" fill="{c}" '
+                     f'fill-opacity="0.85" stroke="#fff" stroke-width="1"><title>{esc(s.sid)}: '
+                     f'QEI {s.qei:.3f} ({esc(s.overall)})</title></circle>')
+    parts.append("</svg>")
+    na_note = (f'<p class="cap" style="color:var(--faint);margin:.4rem 0 0">'
+               f'{len(na)} subject(s) had no QEI (no tissue maps).</p>' if na else "")
+    return ('<div class="card panel"><h3>QEI across the cohort</h3>'
+            '<p class="cap" style="color:var(--muted);margin:.1rem 0 .3rem">Each dot is one subject '
+            "against the published 0.5 cutoff. Left of the dashed line is a likely reject.</p>"
+            + "".join(parts) + na_note + '</div>')
+
+
 def _filter_bar(summary: BatchSummary) -> str:
     """Client-side verdict filter for the ledger — the proposal's Filter control.
     Rows carry data-v; the chips show/hide them with no server round-trip."""
@@ -582,7 +683,8 @@ def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) ->
         + _filter_bar(summary) + _ledger(subjects) + '</div>'
         '<div class="card panel"><h3>Flagged checks</h3>'
         '<p class="cap" style="color:var(--muted);margin:.1rem 0 .85rem">How often each check flagged a subject.</p>'
-        + _artifact_breakdown(summary) + _insight(summary, cfg) + '</div></div>')
+        + _artifact_breakdown(summary) + _insight(summary, cfg) + '</div></div>'
+        + '<div class="cols2">' + _qei_strip(subjects, cfg) + _check_carpet(subjects) + '</div>')
     return _shell(subjects, None, "overview", "", content, cfg, overrides, "/")
 
 
