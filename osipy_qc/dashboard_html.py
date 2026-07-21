@@ -15,13 +15,24 @@ Server-rendered pages; styling from the shared design system (_webassets).
 
 from __future__ import annotations
 
+import json
+
 from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
-from .batch import TUNABLE_GROUPS, BatchSummary, Subject
-from .core.config import POPULATIONS, QCConfig
+from .batch import TUNABLE, TUNABLE_GROUPS, BatchSummary, Subject
+from .core.config import POPULATIONS, QCConfig, for_population
 from .report_html import REPORT_CSS, report_body
 
 _POP_ORDER = ["neonate_preterm", "neonate_term", "infant", "child",
               "adolescent", "adult", "elderly"]
+
+# Effective value of every tunable field, per population. Embedded as JSON so the
+# drawer can repopulate the number inputs the instant a population is picked -
+# without this, the fields keep the old bands and the stale values get submitted
+# as overrides, clobbering the population reset on the server. for_population(p)
+# gives QCConfig defaults with that population's CBF bands laid on top.
+_POP_FIELD_VALUES = {p: {name: getattr(for_population(p), name) for name in TUNABLE}
+                     for p in _POP_ORDER}
+_POP_VALUES_JSON = json.dumps(_POP_FIELD_VALUES)
 
 _DASH_CSS = """
 body{display:flex;min-height:100vh}
@@ -124,6 +135,8 @@ body{display:flex;min-height:100vh}
 .drawer .grp-h::after{content:"";flex:1;height:1px;background:var(--line)}
 .drawer .two{display:grid;grid-template-columns:1fr 1fr;gap:.15rem .6rem}
 .drawer .f label{margin:.35rem 0 .25rem}
+.drawer input.changed{background:var(--accent-050);border-color:var(--accent);
+  transition:background .35s ease,border-color .35s ease}
 .drawer .chk{display:flex;align-items:center;gap:.5rem;margin-top:1.15rem;font-size:.88rem;color:var(--ink);font-family:var(--sans);text-transform:none;letter-spacing:0}
 .drawer .actions{display:flex;gap:.6rem;margin-top:1.5rem}
 .drawer .actions .btn-primary{flex:1}
@@ -211,7 +224,8 @@ def _config_drawer(cfg: QCConfig, back: str) -> str:
         '<p class="d-sub">Every cutoff that grades the CBF-map checks. Pick a population to '
         'reset the CBF bands, then fine-tune. Re-grades the whole cohort live.</p>'
         f'<input type="hidden" name="back" value="{esc(back)}">'
-        f'<label>Population</label><select name="population">{pop_opts}</select>'
+        f'<label>Population</label>'
+        f'<select name="population" onchange="applyPop(this.value)">{pop_opts}</select>'
         f'{groups}'
         f'<label class="chk"><input type="checkbox" name="strict" value="on"'
         f'{" checked" if cfg.strict else ""}> strict &mdash; uncalibrated checks may FAIL</label>'
@@ -224,6 +238,13 @@ def _config_drawer(cfg: QCConfig, back: str) -> str:
 _LIGHTBOX_JS = """
 <div id="lb" onclick="this.classList.remove('open');this.innerHTML=''"></div>
 <script>
+var POP_VALUES=__POP_VALUES__;
+function applyPop(p){var v=POP_VALUES[p]; if(!v)return;
+  // repopulate the number inputs so what's shown (and submitted) matches the
+  // chosen population - otherwise the stale values clobber the reset on Apply.
+  for(var k in v){var el=document.querySelector('#drawer [name="'+k+'"]');
+    if(el){el.value=v[k]; el.classList.add('changed');
+      setTimeout(function(e){return function(){e.classList.remove('changed')}}(el),700);}}}
 function openCfg(){document.getElementById('drawer').classList.add('open');
   document.getElementById('scrim').classList.add('open');}
 function closeCfg(){document.getElementById('drawer').classList.remove('open');
@@ -237,7 +258,7 @@ document.addEventListener('click',function(e){
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){
   document.getElementById('lb').classList.remove('open');closeCfg();}});
 </script>
-"""
+""".replace("__POP_VALUES__", _POP_VALUES_JSON)
 
 
 def _shell(subjects, active, view, crumb, content, cfg, overrides, back) -> str:

@@ -13,8 +13,8 @@ import urllib.request
 import nibabel as nib
 import numpy as np
 
-from osipy_qc.batch import (Subject, check_label, demo_cohort, grade_folder,
-                            stream_b_checks, summarise)
+from osipy_qc.batch import (TUNABLE, Subject, check_label, demo_cohort,
+                            grade_folder, stream_b_checks, summarise)
 from osipy_qc.core.config import QCConfig
 from osipy_qc.dashboard_html import render_overview, render_subject
 from osipy_qc.web import QCHandler, _Server, serve_dashboard  # noqa: F401
@@ -230,3 +230,34 @@ def test_overview_has_the_threshold_panel_and_lightbox():
     assert 'id="drawer"' in h and "Apply &amp; re-grade" in h   # config panel
     assert 'id="lb"' in h                                        # lightbox
     assert 'onclick="window.print()"' in h                      # export
+
+
+def test_config_drawer_exposes_the_full_grouped_threshold_set():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    # a field from most groups is present as a real input the panel can tune
+    for name in ("qei_pass", "gm_cbf_fail_lo", "wm_cbf_hi", "ratio_min",
+                 "neg_gm_fail", "coverage_fail", "deep_gm_ratio_lo"):
+        assert f'name="{name}"' in h
+
+
+def test_population_change_repopulates_fields_and_survives_apply():
+    """The bug: picking a population left the number fields on the old bands, and
+    Apply then submitted those stale values, clobbering the population reset. The
+    fix embeds each population's field values + an onchange handler, so the fields
+    (and what gets submitted) match the chosen population."""
+    from osipy_qc.batch import cfg_from_params
+    from osipy_qc.core.config import for_population
+
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert "applyPop(this.value)" in h                 # the handler is wired
+    assert '"gm_cbf_lo": 70.0' in h                     # child's GM band is embedded for the JS
+
+    # the round-trip the JS produces (child's own values submitted) must survive
+    # cfg_from_params and NOT fall back to the adult 40:
+    child = for_population("child")
+    params = {name: str(getattr(child, name)) for name in TUNABLE}
+    params["population"] = "child"
+    eff = cfg_from_params(QCConfig(), params)
+    assert eff.population == "child" and eff.gm_cbf_lo == 70.0
