@@ -60,14 +60,36 @@ def main(argv=None) -> int:
                     help="age group for the CBF bands: neonate_term, neonate_preterm, "
                          "infant, child, adolescent, adult, elderly (default: adult)")
     ap.add_argument("--serve", action="store_true",
-                    help="start the local web UI: upload a CBF map in the browser")
-    ap.add_argument("--port", type=int, default=8000, help="port for --serve (default 8000)")
-    ap.add_argument("--no-browser", action="store_true",
-                    help="with --serve, do not open a browser window")
+                    help="local web UI: upload a single CBF map in the browser")
+    ap.add_argument("--dashboard", metavar="FOLDER",
+                    help="cohort dashboard: grade every subject subfolder of FOLDER and serve it")
+    ap.add_argument("--dashboard-demo", action="store_true",
+                    help="cohort dashboard populated with a synthetic demo cohort")
+    ap.add_argument("--port", type=int, default=8000, help="port for the web UI (default 8000)")
+    ap.add_argument("--no-browser", action="store_true", help="do not open a browser window")
     args = ap.parse_args(argv)
 
     if args.provenance:
         _print_provenance()
+        return 0
+
+    if args.dashboard_demo or args.dashboard:
+        from .web import serve_dashboard
+        open_browser = not args.no_browser
+        if args.dashboard_demo:
+            from .batch import demo_cohort
+            print("grading a synthetic demo cohort...")
+            serve_dashboard(demo_cohort(14), dataset="demo_cohort (synthetic)",
+                            port=args.port, open_browser=open_browser)
+        else:
+            from .batch import grade_folder
+            print(f"grading subjects under {args.dashboard} ...")
+            subs = grade_folder(args.dashboard)
+            if not subs:
+                ap.error(f"no subject folders with a CBF map found under {args.dashboard!r}")
+                return 2
+            serve_dashboard(subs, dataset=args.dashboard, port=args.port,
+                            open_browser=open_browser)
         return 0
 
     if args.serve:

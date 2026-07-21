@@ -306,10 +306,26 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        batch = getattr(self.server, "batch", None)     # set in dashboard mode
+        path = self.path.split("?", 1)[0]
+
+        if batch and path in ("/", "/index.html"):
+            from .dashboard_html import render_overview
+            self._send(render_overview(batch["subjects"], batch["summary"],
+                                       batch["cfg"], batch["dataset"]))
+        elif batch and path.startswith("/subject/"):
+            from .dashboard_html import render_subject
+            sid = path[len("/subject/"):]
+            sub = next((s for s in batch["subjects"] if s.sid == sid), None)
+            if sub is None:
+                self._send("<h1>404</h1><p><a href='/'>Back to overview</a></p>", 404)
+            else:
+                self._send(render_subject(batch["subjects"], sub, batch["cfg"]))
+        elif path in ("/", "/index.html", "/upload"):
             self._send(_upload_page())
         else:
-            self._send("<h1>404</h1><p><a href='/'>Start over</a></p>", 404)
+            dest = "/" if batch else "/"
+            self._send(f"<h1>404</h1><p><a href='{dest}'>Start over</a></p>", 404)
 
     def do_POST(self):
         if self.path != "/run":
@@ -335,20 +351,39 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
 class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    batch = None                # set to a dict{subjects,summary,cfg,dataset} for the dashboard
+
+
+def _run(httpd, url: str, banner: str, open_browser: bool) -> None:
+    print(banner)
+    print(f"  {url}   (Ctrl-C to stop)")
+    if open_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped.")
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True) -> None:
-    """Run the local QC web app. Binds to localhost by default (see module docstring)."""
+    """Run the single-scan upload console. Binds to localhost (see module docstring)."""
     with _Server((host, port), QCHandler) as httpd:
-        url = f"http://{host}:{port}/"
-        print(f"osipy-qc web UI running at {url}")
-        print("  upload a CBF map (+ tissue maps) and get a report. Ctrl-C to stop.")
-        if open_browser:
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nstopped.")
+        _run(httpd, f"http://{host}:{port}/", "osipy-qc upload console running at", open_browser)
+
+
+def serve_dashboard(subjects, cfg=None, dataset: str = "cohort",
+                    host: str = "127.0.0.1", port: int = 8000,
+                    open_browser: bool = True) -> None:
+    """Run the cohort dashboard over an already-graded list of Subjects."""
+    from .batch import summarise
+    from .core.config import QCConfig
+
+    cfg = cfg or QCConfig()
+    with _Server((host, port), QCHandler) as httpd:
+        httpd.batch = {"subjects": subjects, "summary": summarise(subjects),
+                       "cfg": cfg, "dataset": dataset}
+        _run(httpd, f"http://{host}:{port}/",
+             f"osipy-qc dashboard running ({len(subjects)} subjects) at", open_browser)
