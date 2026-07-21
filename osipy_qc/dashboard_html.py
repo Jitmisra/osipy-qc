@@ -14,37 +14,45 @@ no build step. Styling comes from the shared design system (_webassets).
 
 from __future__ import annotations
 
-from ._webassets import BASE_CSS, LOGO_SVG, VERDICT_COLOURS, esc
+from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
 from .batch import BatchSummary, Subject
 from .core.config import QCConfig
 from .report_html import REPORT_CSS, report_body
 
 _DASH_CSS = """
 body{display:flex;min-height:100vh}
-.side{width:248px;flex:none;background:var(--surface);border-right:1px solid var(--line);
+.side{width:250px;flex:none;background:var(--surface);border-right:1px solid var(--line);
   display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side .brand{padding:1.2rem 1.3rem;border-bottom:1px solid var(--line)}
+.side .brand{padding:1.25rem 1.3rem;border-bottom:1px solid var(--line)}
 .side .nav{padding:1rem .8rem .4rem}
-.side .nav a{display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:9px;
+.side .nav a{display:flex;align-items:center;gap:.55rem;padding:.55rem .7rem;border-radius:9px;
   color:var(--ink);font-size:.92rem;font-weight:500}
 .side .nav a:hover{background:var(--well);text-decoration:none}
 .side .nav a.on{background:var(--accent-050);color:var(--accent-600);font-weight:600}
 .side .plist{padding:.4rem .8rem 1.2rem}
 .side .plist .h{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--faint);padding:.6rem .7rem .4rem}
-.side .plist a{display:flex;align-items:center;gap:.6rem;padding:.42rem .7rem;border-radius:8px;
+  color:var(--faint);padding:.8rem .7rem .45rem}
+.side .plist a{display:flex;align-items:center;gap:.6rem;padding:.44rem .7rem;border-radius:8px;
   color:var(--muted);font-size:.88rem;font-family:var(--mono)}
 .side .plist a:hover{background:var(--well);text-decoration:none;color:var(--ink)}
-.side .plist a.on{background:var(--well);color:var(--ink);font-weight:600}
+.side .plist a.on{background:var(--accent-050);color:var(--accent-600);font-weight:600}
 .side .pdot{width:8px;height:8px;border-radius:50%;flex:none}
 
 .main{flex:1;min-width:0}
-.mtop{display:flex;align-items:center;gap:1rem;padding:1.1rem 2rem;border-bottom:1px solid var(--line);
-  position:sticky;top:0;background:rgba(251,247,241,.9);backdrop-filter:blur(6px);z-index:5}
-.mtop .title{font-weight:680;font-size:1.02rem;letter-spacing:-.01em}
-.mtop .title .v{color:var(--accent-600)}
+.mtop{display:flex;align-items:center;gap:.9rem;padding:.95rem 2rem;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:rgba(250,248,245,.9);backdrop-filter:blur(8px);z-index:5}
+.mtop .app{font-weight:730;font-size:1.02rem;color:var(--accent);letter-spacing:-.01em}
+.mtop .organ{font-family:var(--mono);font-size:.74rem}
 .mtop .spacer{flex:1}
-.content{padding:1.8rem 2rem 3.5rem;max-width:1160px}
+.mtop nav{display:flex;gap:.3rem}
+.mtop nav a{font-size:.86rem;color:var(--muted);padding:.35rem .7rem;border-radius:8px;font-weight:500}
+.mtop nav a:hover{background:var(--well);text-decoration:none}
+.mtop nav a.on{color:var(--accent-600);font-weight:650}
+.mtop nav a.off{color:var(--faint);cursor:default}
+.mtop nav a.off:hover{background:none}
+.crumb{font-size:.86rem;color:var(--muted);margin:0 0 1rem;font-family:var(--mono)}
+.crumb a{color:var(--muted)} .crumb b{color:var(--accent-600)}
+.content{padding:1.8rem 2rem 3.5rem;max-width:1180px}
 .page-h{margin:.2rem 0 .3rem;font-size:2rem;font-weight:730;letter-spacing:-.02em}
 .page-sub{color:var(--muted);margin:0 0 1.6rem;font-size:.95rem}
 
@@ -117,28 +125,44 @@ def _sidebar(subjects: list[Subject], active: str | None, view: str) -> str:
     up_on = " on" if view == "upload" else ""
     return (
         '<aside class="side">'
-        f'<div class="brand">{LOGO_SVG}<b>osipy-qc</b></div>'
+        f'<div class="brand">{brand("QC-ToolBox v1.0")}</div>'
         '<nav class="nav">'
-        f'<a class="{ov_on.strip()}" href="/">&#9638; Overview</a>'
-        f'<a class="{up_on.strip()}" href="/upload">&#43; Grade a new scan</a>'
+        f'<a class="{ov_on.strip()}" href="/">&#9638;&nbsp; Overview</a>'
+        f'<a class="{up_on.strip()}" href="/upload">&#43;&nbsp; Grade a new scan</a>'
         '</nav>'
         + "".join(plist) +
         '</aside>'
     )
 
 
-def _shell(subjects: list[Subject], active: str | None, view: str, title_html: str,
+def _mtop(cfg: QCConfig, view: str) -> str:
+    ov = "on" if view == "overview" else ""
+    return (
+        '<div class="mtop">'
+        '<span class="app">QC-ToolBox V1.0</span>'
+        f'<span class="chip organ">&#129504; {esc(cfg.organ).title()}</span>'
+        '<div class="spacer"></div>'
+        '<nav>'
+        f'<a class="{ov}" href="/">Dashboard</a>'
+        '<a class="off" title="planned">Projects</a>'
+        '<a class="off" title="planned">Archive</a></nav>'
+        f'<span class="chip">population: {esc(cfg.population)}</span>'
+        '</div>'
+    )
+
+
+def _shell(subjects: list[Subject], active: str | None, view: str, crumb: str,
            content: str, cfg: QCConfig) -> str:
+    crumb_html = f'<p class="crumb">{crumb}</p>' if crumb else ""
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>osipy-qc &mdash; dashboard</title><style>{BASE_CSS}{REPORT_CSS}{_DASH_CSS}</style>"
+        f"<title>OSIPI QC-ToolBox</title><style>{BASE_CSS}{REPORT_CSS}{_DASH_CSS}</style>"
         "</head><body>"
         + _sidebar(subjects, active, view) +
         '<main class="main">'
-        f'<div class="mtop"><div class="title">{title_html}</div><div class="spacer"></div>'
-        f'<div class="chip mono">population: {esc(cfg.population)}</div></div>'
-        f'<div class="content">{content}</div>'
+        + _mtop(cfg, view) +
+        f'<div class="content">{crumb_html}{content}</div>'
         '</main></body></html>'
     )
 
@@ -248,8 +272,7 @@ def render_overview(subjects: list[Subject], summary: BatchSummary,
         f'{_artifact_breakdown(summary)}{_insight(summary, cfg)}</div>'
         '</div>'
     )
-    return _shell(subjects, active=None, view="overview",
-                  title_html='osipy-qc <span class="v">&middot; cohort QC</span>',
+    return _shell(subjects, active=None, view="overview", crumb="",
                   content=content, cfg=cfg)
 
 
@@ -258,8 +281,6 @@ def render_overview(subjects: list[Subject], summary: BatchSummary,
 # --------------------------------------------------------------------------- #
 def render_subject(subjects: list[Subject], subject: Subject, cfg: QCConfig) -> str:
     body = report_body(subject.report, subject.inputs, subject.cfg)
-    title = (f'<a href="/" style="color:var(--muted)">Overview</a> '
-             f'<span style="color:var(--faint)">/</span> '
-             f'<span class="v">{esc(subject.sid)}</span>')
+    crumb = f'<a href="/">Overview</a> / <b>{esc(subject.sid)}</b>'
     return _shell(subjects, active=subject.sid, view="subject",
-                  title_html=title, content=body, cfg=subject.cfg)
+                  crumb=crumb, content=body, cfg=subject.cfg)

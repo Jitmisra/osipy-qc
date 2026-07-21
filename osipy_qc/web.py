@@ -37,7 +37,7 @@ import tempfile
 import traceback
 import webbrowser
 
-from ._webassets import BASE_CSS, LOGO_SVG, esc
+from ._webassets import BASE_CSS, brand, esc
 from .core.config import POPULATIONS, for_population
 from .report import run_qc
 from .report_html import render_html
@@ -140,8 +140,7 @@ def _upload_page(error: str = "") -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>osipy-qc &mdash; ASL quality control</title>
 <style>{BASE_CSS}{_CONSOLE_CSS}</style></head><body>
-<div class="topbar"><div class="brand">{LOGO_SVG}<b>osipy-qc</b>
-  <span>ASL quality control</span></div></div>
+<div class="topbar">{brand("ASL quality control")}</div>
 
 <div class="stage">
   <div class="lede">
