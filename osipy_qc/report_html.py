@@ -76,15 +76,27 @@ figure img{display:block;width:100%;height:auto;background:#0c0b0a}
 figure svg{display:block;width:100%;height:auto;background:var(--surface);padding:.4rem}
 figcaption{font-size:.78rem;color:var(--muted);padding:.6rem .8rem;border-top:1px solid var(--line)}
 
+/* driving-check chips in the hero */
+.drivers{margin-top:1rem;font-size:.82rem;color:var(--muted);display:flex;flex-wrap:wrap;
+  gap:.4rem;align-items:center}
+.drivers .dchip{display:inline-flex;align-items:center;gap:.35rem;background:var(--surface);
+  border:1px solid var(--line);border-radius:100px;padding:.2rem .6rem;font-size:.78rem;
+  font-family:var(--mono);color:var(--ink)}
+.drivers .dchip:hover{text-decoration:none;border-color:var(--faint)}
+.drivers .dchip .dot{width:7px;height:7px;border-radius:50%;flex:none}
+
 /* check cards */
 .checks{display:flex;flex-direction:column;gap:.7rem}
-.check{display:grid;grid-template-columns:5px 1fr;overflow:hidden}
+.check{display:grid;grid-template-columns:5px 1fr;overflow:hidden;scroll-margin-top:80px}
 .check .rail{width:5px}
 .check .body{padding:.95rem 1.1rem}
-.check .head{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.check .head{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .check .vpill{font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.04em;
   padding:.16rem .5rem;border-radius:6px;color:#fff}
-.check .cname{font-family:var(--mono);font-weight:600;font-size:.9rem}
+.check .cname{font-weight:650;font-size:.95rem;letter-spacing:-.01em}
+.check .cid{font-family:var(--mono);font-size:.68rem;color:var(--faint)}
+.check .prov-tag{font-family:var(--mono);font-size:.62rem;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--warn);border:1px dashed var(--warn);border-radius:5px;padding:.08rem .38rem}
 .check .reason{color:var(--muted);margin:.4rem 0 0;font-size:.92rem}
 .check details{margin-top:.6rem}
 .check summary{cursor:pointer;font-size:.76rem;color:var(--accent-600);font-family:var(--mono);
@@ -114,6 +126,16 @@ def _by_name(report_dict) -> dict[str, dict]:
     return {r["check"]: r for r in report_dict["checks"]}
 
 
+def _slug(check: str) -> str:
+    """Stable anchor id for a check, so the hero can jump to its card."""
+    import re
+    return "chk-" + re.sub(r"[^a-z0-9]+", "-", check.lower()).strip("-")
+
+
+# verdict severity for sorting cards worst-first (triage order)
+_SEV = {"FAIL": 0, "WARN": 1, "INFO": 2, "PASS": 3, "UNKNOWN": 4, "N/A": 5}
+
+
 # --------------------------------------------------------------------------- #
 # hero
 # --------------------------------------------------------------------------- #
@@ -126,6 +148,7 @@ def _hero(d: dict, cfg: QCConfig) -> str:
         chips.append(f'<span class="chip"><span class="dot" style="background:{c}"></span>'
                      f'{n} {esc(v)}</span>')
     gloss = _OVERALL_GLOSS.get(overall, "")
+    drivers = _driver_chips(d)
     # A subtle wash of the verdict tint, kept light so text stays readable.
     return (
         f'<div class="hero" style="background:linear-gradient(180deg,{bg},var(--surface))">'
@@ -133,8 +156,26 @@ def _hero(d: dict, cfg: QCConfig) -> str:
         f'<h1 style="color:{fg}">{esc(overall)}</h1>'
         f'<p>{esc(gloss)}</p>'
         f'<div class="chips">{"".join(chips)}</div>'
+        f'{drivers}'
         f'</div>'
     )
+
+
+def _driver_chips(d: dict) -> str:
+    """The checks actually responsible for a non-PASS verdict, as jump-links to
+    their cards — so a reviewer sees *what* failed without scrolling."""
+    from .batch import check_label
+
+    bad = [r for r in d["checks"] if r["verdict"] in ("FAIL", "WARN")]
+    bad.sort(key=lambda r: _SEV.get(r["verdict"], 9))
+    if not bad:
+        return ""
+    chips = []
+    for r in bad:
+        c = VERDICT_COLOURS.get(r["verdict"], ("#8A8079", ""))[0]
+        chips.append(f'<a class="dchip" href="#{_slug(r["check"])}">'
+                     f'<span class="dot" style="background:{c}"></span>{esc(check_label(r["check"]))}</a>')
+    return f'<div class="drivers"><span>Needs attention:</span>{"".join(chips)}</div>'
 
 
 # --------------------------------------------------------------------------- #
@@ -234,9 +275,10 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
 
     try:
         figs.append(
-            '<figure><img alt="CBF slices" src="' + png_data_uri(slice_mosaic(cbf)) + '">'
+            '<figure><img alt="Axial CBF slices, inferno colour map" '
+            'src="' + png_data_uri(slice_mosaic(cbf)) + '">'
             '<figcaption>CBF map &mdash; evenly spaced axial slices. '
-            'Blue = negative (impossible) voxels.</figcaption></figure>'
+            'Blue = negative CBF (non-physical &mdash; a noise / subtraction artefact).</figcaption></figure>'
         )
     except Exception as exc:
         figs.append(f'<figure><figcaption>CBF mosaic unavailable: {esc(exc)}</figcaption></figure>')
@@ -261,7 +303,7 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
                 figs.append(
                     '<figure><img alt="GM-masked CBF" src="' + png_data_uri(slice_mosaic(overlay))
                     + '"><figcaption>CBF inside the GM mask only. Gaps here mean the mask covers '
-                      'voxels the ASL never imaged (see 4.2.coverage).</figcaption></figure>'
+                      'voxels the ASL never imaged (see the Coverage check).</figcaption></figure>'
                 )
         except Exception as exc:
             figs.append(f'<figure><figcaption>overlay unavailable: {esc(exc)}</figcaption></figure>')
@@ -286,8 +328,11 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
 # check cards
 # --------------------------------------------------------------------------- #
 def _check_card(res: dict) -> str:
+    from .batch import check_label
+
     verdict = res["verdict"]
     fg, _bg = VERDICT_COLOURS.get(verdict, ("#8A8079", ""))
+    provisional = bool(res.get("provisional")) and verdict in ("FAIL", "WARN")
     metric = res.get("metric") or {}
     rows = "".join(
         f"<tr><td>{esc(k)}</td><td>{esc(_fmt(v))}</td></tr>" for k, v in metric.items()
@@ -296,11 +341,19 @@ def _check_card(res: dict) -> str:
     if rows:
         details = (f'<details><summary>details</summary>'
                    f'<div class="scroll"><table class="mtable">{rows}</table></div></details>')
+    # a provisional verdict gets a striped rail (vs a solid one) + a dashed tag,
+    # so an uncalibrated-driven FAIL never reads as a hard, evidence-backed one.
+    rail = (f'background:repeating-linear-gradient(45deg,{fg} 0 4px,transparent 4px 8px)'
+            if provisional else f'background:{fg}')
+    prov_tag = ('<span class="prov-tag" title="decided by an uncalibrated cutoff">'
+                'provisional</span>' if provisional else "")
     return (
-        f'<div class="card check"><div class="rail" style="background:{fg}"></div>'
+        f'<div class="card check" id="{_slug(res["check"])}">'
+        f'<div class="rail" style="{rail}"></div>'
         f'<div class="body"><div class="head">'
         f'<span class="vpill" style="background:{fg}">{esc(verdict)}</span>'
-        f'<span class="cname">{esc(res["check"])}</span></div>'
+        f'<span class="cname">{esc(check_label(res["check"]))}</span>'
+        f'<span class="cid">{esc(res["check"])}</span>{prov_tag}</div>'
         f'<p class="reason">{esc(res.get("reason", ""))}</p>'
         f'{details}</div></div>'
     )
@@ -318,7 +371,9 @@ def _checks_grouped(report, d: dict) -> str:
     out = []
     for stream in sorted(buckets, key=lambda s: order.get(s, 9)):
         title = _STREAM_TITLES.get(stream, "Other")
-        cards = "".join(_check_card(r) for r in buckets[stream])
+        # worst-first within each stream, so failing checks lead (triage order)
+        ordered = sorted(buckets[stream], key=lambda r: _SEV.get(r["verdict"], 9))
+        cards = "".join(_check_card(r) for r in ordered)
         out.append(f'<div class="section-title">Checks &mdash; {esc(title)}</div>'
                    f'<div class="checks">{cards}</div>')
     return "".join(out)
@@ -340,16 +395,20 @@ def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
     inputs = inputs or {}
     d = report.to_dict()
     note = (
-        '<div class="note" style="margin-top:1.6rem">Each number carries a badge saying whether '
-        'its threshold is <b>published</b>, from a reference <b>implementation</b>, or an '
-        '<b>uncalibrated</b> engineering default &mdash; uncalibrated thresholds never drive a '
-        'FAIL on their own. Full sources in THRESHOLD_PROVENANCE.md.</div>'
+        '<div class="note" style="margin-top:1.6rem">A verdict marked '
+        '<b>provisional</b> was decided by an <b>uncalibrated</b> cutoff &mdash; an engineering '
+        'default with no published derivation. Under strict grading (the default) it can raise a '
+        'FAIL; turn strict off to demote it to a WARN. Checks marked <b>N/A</b> or <b>INFO</b> are '
+        'excluded from the overall verdict. Full sourcing in THRESHOLD_PROVENANCE.md '
+        '(<code>osipy-qc --provenance</code>).</div>'
     ) if with_note else ""
+    # Findings before images: on a FAIL scan the checks are the diagnosis and the
+    # mosaics are the supporting evidence.
     return (
         f'{_hero(d, cfg)}'
         f'{_kpi_tiles(_by_name(d), cfg)}'
-        f'{_figures(inputs, cfg)}'
         f'{_checks_grouped(report, d)}'
+        f'{_figures(inputs, cfg)}'
         f'{note}'
     )
 

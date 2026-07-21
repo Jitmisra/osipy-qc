@@ -108,7 +108,7 @@ def test_overview_is_self_contained_and_lists_every_subject():
     for s in subs:
         assert f"/subject/{s.sid}" in h            # ledger + sidebar link to each
     assert "Batch overview" in h
-    assert "Artifact breakdown" in h
+    assert "Flagged checks" in h
 
 
 def test_overview_shows_the_rates():
@@ -261,3 +261,23 @@ def test_population_change_repopulates_fields_and_survives_apply():
     params["population"] = "child"
     eff = cfg_from_params(QCConfig(), params)
     assert eff.population == "child" and eff.gm_cbf_lo == 70.0
+
+
+# --------------------------------------------------------------------------- #
+# triage: worst-first ordering + the ledger verdict filter (review findings M4/M5)
+# --------------------------------------------------------------------------- #
+def test_ledger_is_sorted_worst_first_with_filter_chips():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    body = h.split('id="ledgerbody"', 1)[1]
+    order = re.findall(r'data-v="(PASS|WARN|FAIL)"', body)
+    sev = {"FAIL": 0, "WARN": 1, "PASS": 2}
+    assert order == sorted(order, key=lambda v: sev[v])   # worst first
+    assert 'class="fchip' in h and 'onclick="filterLedger(this)"' in h
+    assert "worst first" in h
+
+
+def test_sidebar_dots_are_not_colour_only():
+    subs, summ, cfg = _cohort()
+    h = render_overview(subs, summ, cfg, "demo")
+    assert 'aria-label=' in h            # verdict dots carry a text label

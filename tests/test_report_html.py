@@ -135,12 +135,13 @@ def test_report_shows_every_check():
         assert r.check in h
 
 
-def test_report_shows_threshold_provenance():
-    """The direct answer to 'how did you get this number?' — every graded number
-    carries a badge saying whether its threshold is published or a guess."""
+def test_report_is_honest_about_uncalibrated_provenance():
+    """The direct answer to 'how did you get this number?' — the report explains
+    that some verdicts are *provisional* (decided by an uncalibrated cutoff, not a
+    published threshold) and points to the full sourcing."""
     report, inputs = _demo_report()
     h = render_html(report, inputs=inputs)
-    assert ">published<" in h
+    assert ">provisional<" in h
     assert ">uncalibrated<" in h
     assert "THRESHOLD_PROVENANCE.md" in h
 
@@ -168,3 +169,27 @@ def test_report_escapes_html_in_reasons():
     h = render_html(QCReport(Verdict.PASS, [evil]), inputs={})
     assert "<script>alert(1)</script>" not in h
     assert "&lt;script&gt;" in h
+
+
+def test_provisional_uncalibrated_fail_renders_a_marker_not_a_hard_fail():
+    """A FAIL from an uncalibrated cutoff must be visibly provisional in the report,
+    so it never reads as a hard, evidence-backed failure (2026-07 review, M1)."""
+    from osipy_qc.core.config import QCConfig
+    from osipy_qc.core.result import CheckResult, Verdict
+    from osipy_qc.report import QCReport
+
+    prov = CheckResult("4.2.coverage", Verdict.FAIL, reason="only 40% covered",
+                       provisional=True)
+    h = render_html(QCReport(Verdict.FAIL, [prov]), inputs={})
+    assert "provisional" in h                       # the marker shows
+    assert "repeating-linear-gradient" in h          # the striped (not solid) rail
+
+
+def test_check_cards_use_human_names_and_keep_the_id():
+    """Cards show a friendly name (QEI, Coverage) but keep the dotted id for traceability."""
+    from osipy_qc.core.result import CheckResult, Verdict
+    from osipy_qc.report import QCReport
+
+    r = CheckResult("1.qei", Verdict.PASS, metric={"qei": 0.8}, reason="ok")
+    h = render_html(QCReport(Verdict.PASS, [r]), inputs={})
+    assert ">QEI<" in h and "1.qei" in h

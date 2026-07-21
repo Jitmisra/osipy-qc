@@ -114,11 +114,18 @@ class Subject:
     @property
     def primary_artifact(self) -> str:
         """The check most responsible for this subject's verdict: the first FAIL,
-        else the first WARN, else '-'. This is what the ledger shows."""
+        else the first WARN, else '-'. This is what the ledger shows.
+
+        A WARN driven only by UNKNOWN inputs (nothing actually flagged, the scan
+        just could not be fully graded) reads as 'incomplete', not a flag —
+        'couldn't grade' is a different message from 'looks borderline'."""
         for want in (Verdict.FAIL, Verdict.WARN):
             for r in self.report.results:
                 if r.verdict is want:
                     return check_label(r.check)
+        n_unknown = sum(1 for r in self.report.results if r.verdict is Verdict.UNKNOWN)
+        if self.overall == "WARN" and n_unknown:
+            return f"incomplete ({n_unknown} n/a)"
         return "-"
 
 

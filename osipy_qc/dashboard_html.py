@@ -17,10 +17,23 @@ from __future__ import annotations
 
 import json
 
-from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
+from ._webassets import (BASE_CSS, PROVENANCE_COLOURS, VERDICT_COLOURS, brand,
+                         esc)
 from .batch import TUNABLE, TUNABLE_GROUPS, BatchSummary, Subject
-from .core.config import POPULATIONS, QCConfig, for_population
+from .core.config import POPULATIONS, QCConfig, for_population, provenance_of
 from .report_html import REPORT_CSS, report_body
+
+# verdict severity for worst-first display ordering (triage)
+_SEV = {"FAIL": 0, "WARN": 1, "PASS": 2, "UNKNOWN": 3, "N/A": 4, "INFO": 5}
+
+
+def _worst_first(subjects: list[Subject]) -> list[Subject]:
+    """A display copy sorted worst-first (FAIL→WARN→PASS), then lowest QEI first.
+    The batch engine's own order is left untouched."""
+    def key(s: Subject):
+        q = s.qei
+        return (_SEV.get(s.overall, 9), q if isinstance(q, (int, float)) else 2.0)
+    return sorted(subjects, key=key)
 
 _POP_ORDER = ["neonate_preterm", "neonate_term", "infant", "child",
               "adolescent", "adult", "elderly"]
@@ -51,7 +64,8 @@ body{display:flex;min-height:100vh}
   color:var(--muted);font-size:.86rem;font-family:var(--mono)}
 .side .plist a:hover{background:var(--well);text-decoration:none;color:var(--ink)}
 .side .plist a.on{background:var(--accent-050);color:var(--accent-600);font-weight:600}
-.side .pdot{width:8px;height:8px;border-radius:50%;flex:none}
+.side .pdot{width:15px;height:15px;border-radius:50%;flex:none;display:inline-flex;
+  align-items:center;justify-content:center;color:#fff;font-size:.6rem;font-weight:800;line-height:1}
 
 .main{flex:1;min-width:0}
 .mtop{display:flex;align-items:center;gap:.85rem;padding:.85rem 1.6rem;border-bottom:1px solid var(--line);
@@ -91,6 +105,25 @@ body{display:flex;min-height:100vh}
 .panel h3{font-size:1.02rem;margin-bottom:.15rem}
 .panel .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem}
 .tag-muted{font-family:var(--mono);font-size:.64rem;color:var(--muted);background:var(--well);padding:.2rem .5rem;border-radius:100px}
+.mtop .chip.mode{font-size:.7rem;color:var(--accent-600);border-color:#EFDBCC;background:var(--accent-050)}
+
+/* ledger filter bar */
+.filterbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 .8rem}
+.fchips{display:flex;gap:.4rem;flex-wrap:wrap}
+.fchip{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--muted);
+  font-family:var(--mono);font-size:.72rem;font-weight:600;padding:.3rem .6rem;border-radius:100px;
+  cursor:pointer;display:inline-flex;align-items:center;gap:.35rem;transition:.12s}
+.fchip:hover{border-color:var(--faint);color:var(--ink)}
+.fchip.on{background:var(--accent-050);border-color:var(--accent);color:var(--accent-600)}
+.fchip .fn{font-size:.66rem;opacity:.7}
+.factive{font-size:.76rem;color:var(--faint);font-family:var(--mono)}
+.ledger tr.hidden{display:none}
+
+/* provenance dots in the drawer */
+.pv-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:.4rem;flex:none;vertical-align:middle}
+.pv-legend{display:flex;gap:.9rem;flex-wrap:wrap;margin:.2rem 0 .1rem;font-family:var(--mono);
+  font-size:.64rem;color:var(--muted)}
+.pv-legend span{display:inline-flex;align-items:center}
 
 /* ledger */
 .ledger{width:100%;border-collapse:collapse}
@@ -167,16 +200,25 @@ _GEAR = ('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="cu
          '1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>')
 
 
+# a redundant (non-colour) glyph per verdict, so the triage list is legible
+# without relying on colour alone.
+_VGLYPH = {"PASS": "✓", "WARN": "!", "FAIL": "✕",
+           "UNKNOWN": "?", "N/A": "–", "INFO": "i"}
+
+
 def _pdot(v: str) -> str:
     c = VERDICT_COLOURS.get(v, ("#8A8079", ""))[0]
-    return f'<span class="pdot" style="background:{c}"></span>'
+    g = _VGLYPH.get(v, "")
+    return (f'<span class="pdot" style="background:{c}" role="img" '
+            f'aria-label="{esc(v)}">{g}</span>')
 
 
 def _sidebar(subjects: list[Subject], active: str | None, view: str, q: str) -> str:
     plist = ['<div class="plist"><div class="h">Participants</div>']
-    for s in subjects:
+    for s in _worst_first(subjects):
         on = "on" if s.sid == active else ""
-        plist.append(f'<a class="{on}" href="/subject/{esc(s.sid)}">{_pdot(s.overall)}{esc(s.sid)}</a>')
+        plist.append(f'<a class="{on}" href="/subject/{esc(s.sid)}" title="{esc(s.sid)} &mdash; '
+                     f'{esc(s.overall)}">{_pdot(s.overall)}{esc(s.sid)}</a>')
     plist.append("</div>")
     return (
         '<aside class="side">'
@@ -190,10 +232,16 @@ def _sidebar(subjects: list[Subject], active: str | None, view: str, q: str) -> 
 
 def _mtop(cfg: QCConfig, view: str, overrides: dict) -> str:
     applied = ('<span class="applied">custom thresholds</span>' if overrides else "")
+    # the grading regime redefines what FAIL means, so keep it always visible
+    strict = ('<span class="chip mode" title="Uncalibrated cutoffs can raise a FAIL">'
+              'strict grading</span>' if cfg.strict else
+              '<span class="chip mode" title="Uncalibrated cutoffs are demoted to WARN">'
+              'lenient grading</span>')
     return (
         '<div class="mtop">'
         '<span class="app">QC-ToolBox V1.0</span>'
         f'<span class="chip organ">&#129504; {esc(cfg.organ).title()}</span>'
+        f'{strict}'
         '<div class="spacer"></div>'
         f'{applied}'
         f'<nav><a class="{"on" if view=="overview" else ""}" href="/">Dashboard</a>'
@@ -211,10 +259,17 @@ def _config_drawer(cfg: QCConfig, back: str) -> str:
 
     def cell(name: str, label: str) -> str:
         val = getattr(cfg, name)
-        return (f'<div class="f"><label>{esc(label)}</label>'
+        lvl, cite, _why = provenance_of(name)
+        col = PROVENANCE_COLOURS.get(lvl.value, ("", "#9A938C"))[1]
+        dot = (f'<span class="pv-dot" style="background:{col}" '
+               f'title="{esc(lvl.value)} &mdash; {esc(cite)}"></span>')
+        return (f'<div class="f"><label>{dot}{esc(label)}</label>'
                 f'<input type="number" step="any" name="{name}" value="{val}"></div>')
 
-    groups = "".join(
+    legend = '<div class="pv-legend">' + "".join(
+        f'<span><span class="pv-dot" style="background:{c}"></span>{esc(lab)}</span>'
+        for lab, c in PROVENANCE_COLOURS.values()) + '</div>'
+    groups = legend + "".join(
         f'<div class="grp"><div class="grp-h">{esc(title)}</div>'
         f'<div class="two">{"".join(cell(n, lab) for n, lab in fields)}</div></div>'
         for title, fields in TUNABLE_GROUPS)
@@ -247,6 +302,12 @@ function applyPop(p){var v=POP_VALUES[p]; if(!v)return;
   for(var k in v){var el=document.querySelector('#drawer [name="'+k+'"]');
     if(el){el.value=v[k]; el.classList.add('changed');
       setTimeout(function(e){return function(){e.classList.remove('changed')}}(el),700);}}}
+function filterLedger(btn){
+  var f=btn.dataset.f, shown=0;
+  document.querySelectorAll('.fchip').forEach(function(b){b.classList.toggle('on',b===btn);});
+  document.querySelectorAll('#ledgerbody tr').forEach(function(tr){
+    var hit=(f==='all'||tr.dataset.v===f); tr.classList.toggle('hidden',!hit); if(hit)shown++;});
+  var c=document.getElementById('fcount'); if(c)c.textContent=shown;}
 function openCfg(){document.getElementById('drawer').classList.add('open');
   document.getElementById('scrim').classList.add('open');}
 function closeCfg(){document.getElementById('drawer').classList.remove('open');
@@ -290,7 +351,7 @@ def _stat_card(k, big, cap, tag, tag_col, frac, bar_col) -> str:
 
 def _ledger(subjects: list[Subject]) -> str:
     rows = []
-    for s in subjects:
+    for s in _worst_first(subjects):
         fg, bg = VERDICT_COLOURS.get(s.overall, ("#8A8079", "#F1ECE4"))
         q = s.qei
         if isinstance(q, (int, float)):
@@ -298,25 +359,30 @@ def _ledger(subjects: list[Subject]) -> str:
             qtxt = f'<span class="num">{q:.2f}</span>'
         else:
             qbar, qtxt = "", '<span class="num" style="color:var(--faint)">&mdash;</span>'
+        flag = s.primary_artifact
+        # 'incomplete (...)' is a not-graded state, not a flag — mute it.
+        flag_cell = (f'<span style="color:var(--faint)">{esc(flag)}</span>'
+                     if flag.startswith("incomplete") else esc(flag))
         rows.append(
-            f'<tr><td class="sid">{esc(s.sid)}</td>'
-            f'<td><span class="vpill" style="color:{fg};background:{bg}">{esc(s.overall)}</span></td>'
+            f'<tr data-v="{esc(s.overall)}"><td class="sid">{esc(s.sid)}</td>'
+            f'<td><span class="vpill" style="color:{fg};background:{bg}">'
+            f'{_VGLYPH.get(s.overall,"")} {esc(s.overall)}</span></td>'
             f'<td><div class="qei-cell">{qbar}{qtxt}</div></td>'
-            f'<td>{esc(s.primary_artifact)}</td>'
+            f'<td>{flag_cell}</td>'
             f'<td><a class="viewbtn" href="/subject/{esc(s.sid)}">View report &rarr;</a></td></tr>')
     return ('<table class="ledger"><thead><tr><th>Participant</th><th>Verdict</th>'
-            '<th>QEI</th><th>Primary artifact</th><th>Action</th></tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>')
+            '<th>QEI</th><th>Primary flag</th><th>Action</th></tr></thead>'
+            f'<tbody id="ledgerbody">{"".join(rows)}</tbody></table>')
 
 
 def _artifact_breakdown(summary: BatchSummary) -> str:
     top = summary.artifact_breakdown[:6]
     if not top:
         return '<p class="cap" style="color:var(--muted)">No checks flagged &mdash; a clean cohort.</p>'
-    mx = max(n for _, n in top) or 1
+    denom = summary.total or 1        # fraction OF THE COHORT, not of the worst bar
     return '<div class="abd">' + "".join(
         f'<div class="row"><div class="lab"><span>{esc(lab)}</span><span class="n">{n}/{summary.total}</span></div>'
-        f'<div class="track"><i style="width:{n/mx*100:.0f}%"></i></div></div>' for lab, n in top) + "</div>"
+        f'<div class="track"><i style="width:{n/denom*100:.0f}%"></i></div></div>' for lab, n in top) + "</div>"
 
 
 def _insight(summary: BatchSummary, cfg: QCConfig) -> str:
@@ -325,6 +391,30 @@ def _insight(summary: BatchSummary, cfg: QCConfig) -> str:
     return (f'<div class="insight">Analysed <b>{summary.total}</b> subjects against the '
             f'<b>{esc(cfg.population)}</b> profile: <b>{summary.pass_rate*100:.0f}%</b> pass, '
             f'{summary.warn_rate*100:.0f}% warn, {summary.fail_rate*100:.0f}% fail.{driver}</div>')
+
+
+def _median(xs: list[float]):
+    xs = sorted(xs)
+    n = len(xs)
+    if not n:
+        return None
+    m = n // 2
+    return xs[m] if n % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def _filter_bar(summary: BatchSummary) -> str:
+    """Client-side verdict filter for the ledger — the proposal's Filter control.
+    Rows carry data-v; the chips show/hide them with no server round-trip."""
+    chips = [('all', 'All', summary.total)]
+    for v in ("PASS", "WARN", "FAIL"):
+        chips.append((v, v.title(), summary.counts.get(v, 0)))
+    btns = "".join(
+        f'<button type="button" class="fchip{" on" if key == "all" else ""}" '
+        f'data-f="{key}" onclick="filterLedger(this)">{esc(lab)}'
+        f'<span class="fn">{n}</span></button>' for key, lab, n in chips)
+    return ('<div class="filterbar"><div class="fchips">' + btns + '</div>'
+            '<span class="factive">Showing <b id="fcount">' + str(summary.total)
+            + '</b> of ' + str(summary.total) + '</span></div>')
 
 
 def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) -> str:
@@ -336,8 +426,23 @@ def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) ->
             return ("OPTIMAL", p) if rate >= 0.8 else ("MODERATE", w) if rate >= 0.5 else ("LOW", f)
         return ("CRITICAL", f) if rate >= 0.4 else ("ELEVATED", w) if rate >= 0.15 else ("LOW", p)
 
+    # Median QEI — the one PUBLISHED, calibrated cohort number (robust on the
+    # small cohorts this tool runs). '—' honestly when no subject had tissue maps.
+    qeis = [s.qei for s in subjects if isinstance(s.qei, (int, float))]
+    med = _median(qeis)
+    if med is None:
+        qei_card = _stat_card("Median QEI", "&mdash;", "no tissue maps supplied",
+                              "PUBLISHED", PROVENANCE_COLOURS["published"][1], None, "")
+    else:
+        below = sum(1 for q in qeis if q < cfg.qei_warn)
+        qcol = p if med >= cfg.qei_warn else f
+        qei_card = _stat_card("Median QEI", f"{med:.2f}",
+                              f"{below}/{len(qeis)} below the {cfg.qei_warn:g} cutoff",
+                              "PUBLISHED", PROVENANCE_COLOURS["published"][1], frac=med, bar_col=qcol)
+
     stats = (
         _stat_card("Total scans", f"{summary.total}", "Analysed cohort", "AGGREGATE", "var(--muted)", None, "")
+        + qei_card
         + _stat_card("Pass rate", f"{summary.pass_rate*100:.0f}<span class='pct'>%</span>",
                      "usable without caveats", *tag(summary.pass_rate, True), frac=summary.pass_rate, bar_col=p)
         + _stat_card("Warning", f"{summary.warn_rate*100:.0f}<span class='pct'>%</span>",
@@ -351,13 +456,14 @@ def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) ->
         f'&middot; {esc(cfg.population)} profile</p></div>'
         '<div class="page-actions">'
         f'<button class="btn btn-sm" onclick="openCfg()">{_GEAR}&nbsp;Thresholds</button>'
-        '<button class="btn btn-sm btn-primary" onclick="window.print()">Export report</button>'
+        '<button class="btn btn-sm btn-primary" onclick="window.print()">Print / Save PDF</button>'
         '</div></div>'
         f'<div class="stats">{stats}</div>'
         '<div class="cols">'
         '<div class="card panel"><div class="ph"><h3>Participant ledger</h3>'
-        '<span class="tag-muted">sorted by import order</span></div>' + _ledger(subjects) + '</div>'
-        '<div class="card panel"><h3>Artifact breakdown</h3>'
+        '<span class="tag-muted">worst first</span></div>'
+        + _filter_bar(summary) + _ledger(subjects) + '</div>'
+        '<div class="card panel"><h3>Flagged checks</h3>'
         '<p class="cap" style="color:var(--muted);margin:.1rem 0 .85rem">How often each check flagged a subject.</p>'
         + _artifact_breakdown(summary) + _insight(summary, cfg) + '</div></div>')
     return _shell(subjects, None, "overview", "", content, cfg, overrides, "/")
@@ -365,7 +471,7 @@ def render_overview(subjects, summary, cfg, dataset="cohort", overrides=None) ->
 
 def render_subject(subjects, subject, cfg, overrides=None) -> str:
     overrides = overrides or {}
-    body = report_body(subject.report, subject.inputs, subject.cfg, with_note=False)
+    body = report_body(subject.report, subject.inputs, subject.cfg, with_note=True)
     crumb = f'<a href="/">Overview</a> / <b>{esc(subject.sid)}</b>'
     back = f"/subject/{subject.sid}"
     return _shell(subjects, subject.sid, "subject", crumb, body, subject.cfg, overrides, back)

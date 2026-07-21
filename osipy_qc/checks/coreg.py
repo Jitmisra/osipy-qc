@@ -59,7 +59,9 @@ def coregistration_check(asl_mask=None, struct_mask=None,
         "n_intersection": inter,
         "provenance": "uncalibrated - no published Dice cutoff exists for registration QC",
     }
-    return CheckResult("4.1.coregistration", v, metric=metric, reason=why)
+    # Both Dice cutoffs are uncalibrated, so any non-PASS verdict is provisional.
+    return CheckResult("4.1.coregistration", v, metric=metric, reason=why,
+                       provisional=v is not Verdict.PASS)
 
 
 @register_qc_check("4.2.coverage", stream="B", required=True)
@@ -100,11 +102,13 @@ def coverage_check(cbf=None, gm=None, wm=None, cfg: QCConfig = QCConfig(), **_) 
     if worst >= cfg.coverage_warn:
         return CheckResult("4.2.coverage", Verdict.PASS, metric=metric,
                            reason=f"{worst*100:.1f}% of the {worst_name} ROI is covered by CBF data")
+    # coverage_warn / coverage_fail are both uncalibrated engineering defaults, so
+    # any non-PASS coverage verdict is provisional.
     if worst >= cfg.coverage_fail:
-        return CheckResult("4.2.coverage", Verdict.WARN, metric=metric,
+        return CheckResult("4.2.coverage", Verdict.WARN, metric=metric, provisional=True,
                            reason=f"only {worst*100:.1f}% of the {worst_name} ROI is covered - "
                                   "CBF level/ratio may be biased by a cropped FOV")
     v = Verdict.FAIL if cfg.strict else Verdict.WARN
-    return CheckResult("4.2.coverage", v, metric=metric,
+    return CheckResult("4.2.coverage", v, metric=metric, provisional=True,
                        reason=f"only {worst*100:.1f}% of the {worst_name} ROI is covered - "
                               "large FOV mismatch (cerebellum outside the ASL slab?)")

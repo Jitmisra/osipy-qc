@@ -76,3 +76,37 @@ def test_negative_gm_na_on_raw_deltam():
     cbf, gm, _ = _masks_from_values([1.0, -1.0], [])
     r = negative_gm_check(cbf=cbf, gm=gm, is_raw_deltam=True)
     assert r.verdict == Verdict.NA
+
+
+# --------------------------------------------------------------------------- #
+# provisional flag — the scientific-honesty fix (2026-07 review, finding M1).
+# A FAIL decided by an UNCALIBRATED cutoff must be marked provisional; a FAIL
+# decided by a PUBLISHED cutoff must NOT be.
+# --------------------------------------------------------------------------- #
+def test_uncalibrated_cbf_level_fail_is_marked_provisional():
+    from osipy_qc.core.config import QCConfig
+    # GM far below the uncalibrated fail bound -> FAIL, and it is provisional
+    cbf, gm, wm = _masks_from_values([3, 4, 3, 4, 3, 4], [2, 2, 2, 2, 2, 2])
+    r = cbf_level_check(cbf=cbf, gm=gm, wm=wm, cfg=QCConfig(strict=True))
+    assert r.verdict is Verdict.FAIL
+    assert r.provisional is True
+    assert r.to_dict()["provisional"] is True
+
+
+def test_published_ratio_fail_is_not_provisional():
+    from osipy_qc.core.config import QCConfig
+    # GM/WM ratio <= 1 is the one PUBLISHED rule (ASLPrep excludes it), so a FAIL
+    # here is evidence-backed, not provisional.
+    cbf, gm, wm = _masks_from_values([20, 20, 20, 20], [25, 25, 25, 25])
+    r = gm_wm_ratio_check(cbf=cbf, gm=gm, wm=wm, cfg=QCConfig(strict=True))
+    assert r.verdict is Verdict.FAIL
+    assert r.provisional is False
+
+
+def test_published_band_warn_is_not_provisional():
+    # GM just outside the published 40-100 band (but inside the fail bounds) is a
+    # WARN driven by a PUBLISHED band, so not provisional.
+    cbf, gm, wm = _masks_from_values([110, 112, 108, 110], [22, 22, 22, 22])
+    r = cbf_level_check(cbf=cbf, gm=gm, wm=wm)
+    assert r.verdict is Verdict.WARN
+    assert r.provisional is False

@@ -43,6 +43,12 @@ class CheckResult:
     verdict: Verdict
     metric: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
+    #: True when this verdict was decided by an UNCALIBRATED threshold (an
+    #: engineering default with no published derivation). Such a verdict is
+    #: "provisional": under strict grading it can be a FAIL, but it would soften
+    #: to a WARN with strict off, and it must never be presented as a hard,
+    #: evidence-backed failure. The report renders these distinctly.
+    provisional: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +56,7 @@ class CheckResult:
             "verdict": self.verdict.value,
             "metric": self.metric,
             "reason": self.reason,
+            "provisional": self.provisional,
         }
 
 

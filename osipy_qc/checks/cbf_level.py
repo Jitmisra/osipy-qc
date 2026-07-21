@@ -68,9 +68,13 @@ def cbf_level_check(cbf=None, gm=None, wm=None, cfg: QCConfig = QCConfig(), **_)
         "gm_band": [cfg.gm_cbf_lo, cfg.gm_cbf_hi],
         "wm_band": [cfg.wm_cbf_lo, cfg.wm_cbf_hi],
     }
+    # A FAIL here is only ever produced by the uncalibrated fail bounds
+    # (the 40-100 / 15.8-27.5 PASS bands are published, but crossing them is a
+    # WARN); so a FAIL is provisional, a published-band WARN is not.
     return CheckResult("3.1.cbf_level", overall, metric=metric,
                        reason=f"GM {mean_gm:.1f} ({v_gm.value}), WM {mean_wm:.1f} ({v_wm.value}) "
-                              f"[{cfg.population} bands]")
+                              f"[{cfg.population} bands]",
+                       provisional=overall is Verdict.FAIL)
 
 
 @register_qc_check("3.2.gm_wm_ratio", stream="B", required=True)
@@ -145,9 +149,11 @@ def negative_gm_check(cbf=None, gm=None, cfg: QCConfig = QCConfig(),
     else:
         v = Verdict.FAIL if cfg.strict else Verdict.WARN
         why = f"{p*100:.1f}% negative GM voxels (swap/failure)"
+    # neg_gm_warn / neg_gm_fail are both uncalibrated (Dolui uses negative-GM as a
+    # continuous QEI term, never a cutoff), so any non-PASS here is provisional.
     return CheckResult("3.3.negative_gm", v,
                        metric={"negGM_fraction": round(p, 4), "n_negative": n_neg, "n_gm": n_gm},
-                       reason=why)
+                       reason=why, provisional=v is not Verdict.PASS)
 
 
 @register_qc_check("3.4.deep_gm_ratio", stream="B", required=False)
