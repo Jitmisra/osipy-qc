@@ -35,8 +35,7 @@ def _worst_first(subjects: list[Subject]) -> list[Subject]:
         return (_SEV.get(s.overall, 9), q if isinstance(q, (int, float)) else 2.0)
     return sorted(subjects, key=key)
 
-_POP_ORDER = ["neonate_preterm", "neonate_term", "infant", "child",
-              "adolescent", "adult", "elderly"]
+_POP_ORDER = ["adult", "neonate"]
 
 # Effective value of every tunable field, per population. Embedded as JSON so the
 # drawer can repopulate the number inputs the instant a population is picked -

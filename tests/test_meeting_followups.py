@@ -127,10 +127,14 @@ def test_scov_provenance_records_the_broken_citation_chain():
 # --------------------------------------------------------------------------- #
 # Maria: lifespan
 # --------------------------------------------------------------------------- #
-def test_population_profiles_exist_across_the_lifespan():
-    for name in ("neonate_term", "neonate_preterm", "infant", "child",
-                 "adolescent", "adult", "elderly"):
-        assert name in POPULATIONS
+def test_v1_ships_adult_and_neonate_only():
+    """v1.0 scope is deliberately tight: adult (the brain target) + neonate (the
+    mentor's neonatal domain). The other age groups are planned but not shipped
+    until their bands are calibrated with the mentors."""
+    assert set(POPULATIONS) == {"adult", "neonate"}
+    for gone in ("neonate_term", "neonate_preterm", "infant", "child",
+                 "adolescent", "elderly"):
+        assert gone not in POPULATIONS
 
 
 def test_adult_bands_are_the_white_paper_band():
@@ -151,9 +155,9 @@ def test_a_healthy_neonate_would_fail_adult_bands_but_pass_neonatal_ones():
     adult = cbf_level_check(cbf=cbf, gm=gm3, wm=wm3, cfg=for_population("adult"))
     assert adult.verdict in (Verdict.WARN, Verdict.FAIL)   # condemned by adult bands
 
-    neo = cbf_level_check(cbf=cbf, gm=gm3, wm=wm3, cfg=for_population("neonate_term"))
+    neo = cbf_level_check(cbf=cbf, gm=gm3, wm=wm3, cfg=for_population("neonate"))
     assert neo.verdict == Verdict.PASS
-    assert neo.metric["population"] == "neonate_term"
+    assert neo.metric["population"] == "neonate"
 
 
 def test_unknown_population_raises_rather_than_defaulting_to_adult():
@@ -175,7 +179,7 @@ def test_neonatal_deep_gm_gradient_passes():
     cbf[:, :, 0] = 30.0
     cbf[:, :, 1] = 16.0
     r = deep_gm_ratio_check(cbf=cbf, deep_gm=deep, cortical_gm=cort,
-                            cfg=for_population("neonate_term"))
+                            cfg=for_population("neonate"))
     assert abs(r.metric["deep_cortical_ratio"] - 1.875) < 1e-3
     assert r.verdict == Verdict.PASS
 
@@ -188,14 +192,14 @@ def test_neonatal_inverted_gradient_warns():
     cbf[:, :, 0] = 16.0     # deep LOWER than cortical -> suspicious in a neonate
     cbf[:, :, 1] = 30.0
     r = deep_gm_ratio_check(cbf=cbf, deep_gm=deep, cortical_gm=cort,
-                            cfg=for_population("neonate_term"))
+                            cfg=for_population("neonate"))
     assert r.metric["deep_cortical_ratio"] < 1.0
     assert r.verdict == Verdict.WARN
     assert "invert" in r.reason.lower()
 
 
 def test_deep_gm_needs_both_masks():
-    r = deep_gm_ratio_check(cbf=np.ones((3, 3, 3)), cfg=for_population("neonate_term"))
+    r = deep_gm_ratio_check(cbf=np.ones((3, 3, 3)), cfg=for_population("neonate"))
     assert r.verdict == Verdict.UNKNOWN
 
 

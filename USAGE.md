@@ -27,7 +27,7 @@ python -m osipy_qc <folder>      # identical, module form
 | `--json` | flag | print the full JSON report instead of the human-readable table |
 | `--demo` | flag | ignore `folder`; grade a synthetic "clean" CBF map instead |
 | `--html PATH` | path | also write a self-contained visual HTML report (images + histograms) |
-| `--population NAME` | str | CBF bands to grade against: `neonate_term`, `neonate_preterm`, `infant`, `child`, `adolescent`, `adult` (default), `elderly` |
+| `--population NAME` | str | CBF bands to grade against: `adult` (default) or `neonate` |
 | `--provenance` | flag | print the source of every threshold, then exit |
 | `--serve` | flag | start the local web UI (upload → report) |
 | `--port N` | int | port for `--serve` (default 8000) |
@@ -138,11 +138,12 @@ report = run_qc(inputs, cfg=cfg)
 ```python
 from osipy_qc.core.config import for_population
 
-cfg = for_population("neonate_term")   # or child / adolescent / adult / elderly ...
+cfg = for_population("neonate")   # v1.0 ships "adult" (default) and "neonate"
 ```
-A child's normal GM CBF (~97) sits at the top of the adult band; a neonate's
-(~16) is far below it. `for_population()` **raises** on an unknown name rather
-than silently grading a neonate against adult bands.
+A newborn's normal GM CBF (~16) is far below the adult 40–100 band, so grading a
+neonate against adult bands would fail every scan. `for_population()` **raises**
+on an unknown name rather than silently defaulting. Other age groups are planned
+once their bands are calibrated with the mentors (see POPULATION_BANDS.md).
 
 ### Provenance — "how did you get this number?"
 ```python

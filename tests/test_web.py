@@ -30,9 +30,9 @@ def _part(name, filename, data):
 # multipart parsing
 # --------------------------------------------------------------------------- #
 def test_parses_a_simple_field():
-    body = _part("population", None, b"neonate_term") + b"--B--\r\n"
+    body = _part("population", None, b"neonate") + b"--B--\r\n"
     got = _parse_multipart(body, "multipart/form-data; boundary=B")
-    assert got["population"] == ("", b"neonate_term")
+    assert got["population"] == ("", b"neonate")
 
 
 def test_binary_payload_survives_byte_for_byte():
@@ -70,7 +70,7 @@ def test_quoted_boundary_is_accepted():
 def test_multiple_fields_round_trip():
     body = (_part("cbf", "a.nii.gz", b"\x1f\x8bAAA")
             + _part("gm", "b.nii.gz", b"\x1f\x8bBBB")
-            + _part("population", None, b"child")
+            + _part("population", None, b"neonate")
             + b"--B--\r\n")
     got = _parse_multipart(body, "multipart/form-data; boundary=B")
     assert set(got) == {"cbf", "gm", "population"}
@@ -88,10 +88,13 @@ def test_missing_boundary_raises():
 # --------------------------------------------------------------------------- #
 # the upload page
 # --------------------------------------------------------------------------- #
-def test_upload_page_offers_every_population():
+def test_upload_page_offers_the_v1_populations():
     page = _upload_page()
-    for p in ("neonate_term", "child", "adult", "elderly"):
+    for p in ("adult", "neonate"):
         assert f'value="{p}"' in page
+    # the un-shipped age groups must not appear
+    for gone in ("child", "elderly", "neonate_term"):
+        assert f'value="{gone}"' not in page
 
 
 def test_upload_page_requires_the_cbf_map_only():

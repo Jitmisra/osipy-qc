@@ -148,8 +148,8 @@ def test_report_is_honest_about_uncalibrated_provenance():
 
 def test_report_states_the_population_whose_bands_were_used():
     report, inputs = _demo_report()
-    h = render_html(report, inputs=inputs, cfg=for_population("neonate_term"))
-    assert "neonate_term" in h
+    h = render_html(report, inputs=inputs, cfg=for_population("neonate"))
+    assert "neonate" in h
 
 
 def test_report_works_without_any_images():

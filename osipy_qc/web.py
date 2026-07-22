@@ -47,12 +47,8 @@ MAX_UPLOAD_BYTES = 512 * 1024 * 1024      # 512 MB across all files in one reque
 
 # youngest -> oldest, for the segmented population control, with short display
 # labels so nothing clips in the chips (the group heading already says "Population")
-_POP_ORDER = ["neonate_preterm", "neonate_term", "infant", "child",
-              "adolescent", "adult", "elderly"]
-_POP_LABELS = {
-    "neonate_preterm": "preterm", "neonate_term": "neonate", "infant": "infant",
-    "child": "child", "adolescent": "teen", "adult": "adult", "elderly": "elderly",
-}
+_POP_ORDER = ["adult", "neonate"]
+_POP_LABELS = {"adult": "adult", "neonate": "neonate"}
 
 _CONSOLE_CSS = """
 .stage{max-width:760px;margin:0 auto;padding:1rem 1.5rem 4rem}
@@ -163,10 +159,10 @@ def _upload_page(error: str = "") -> str:
         <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
     </div>
 
-    <div class="field-label">Population <span class="opt">CBF norms shift across the lifespan</span></div>
+    <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
     <div class="seg">{seg}</div>
-    <p class="hint">A child's normal GM CBF (~97) would look abnormal against adult bands;
-       a neonate's (~16) far more so.</p>
+    <p class="hint">A neonate's normal GM CBF (~16) would look abnormal against the adult
+       40&ndash;100 band, so pick <b>neonate</b> for newborn scans.</p>
 
     <div class="submit-row">
       <button type="submit" class="btn btn-primary">Grade scan &rarr;</button>

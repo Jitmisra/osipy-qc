@@ -10,9 +10,9 @@ All pure NumPy. Masks are coverage-aware (see utils.masks.covered_tissue_mask):
 tissue voxels the CBF map does not actually cover are excluded rather than
 averaged in as zeros.
 
-Bands are population-dependent — a child's normal GM CBF (~97) would FAIL an
-adult band (40-100 is borderline) and an adult's would FAIL a neonatal one
-(~16). Use `config.for_population(...)`; see config.POPULATIONS.
+Bands are population-dependent — a newborn's normal GM CBF (~16) would FAIL the
+adult 40-100 band, and an adult's would FAIL the neonatal one. v1.0 ships two
+profiles (adult, neonate); use `config.for_population(...)`, see config.POPULATIONS.
 """
 
 from __future__ import annotations

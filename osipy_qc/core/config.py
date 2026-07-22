@@ -21,10 +21,12 @@ rather than in a docstring.
 
 Population profiles
 -------------------
-CBF norms move enormously across the lifespan (child GM ~97 vs adult ~58 vs
-elderly ~46 mL/100g/min), so a single adult band would condemn every neonatal
-scan. `for_population()` returns a config tuned to an age group; every number in
-those profiles traces to a citation recorded in THRESHOLD_PROVENANCE.
+CBF norms move enormously with age (a newborn's GM ~16 vs an adult's ~58
+mL/100g/min), so the adult band would condemn every neonatal scan. v1.0 ships
+two calibrated profiles: `adult` (the brain target) and `neonate` (the mentor's
+neonatal domain). Other age groups are planned once their bands are confirmed
+with the mentors. `for_population()` returns the tuned config; every number
+traces to a citation recorded in THRESHOLD_PROVENANCE.md.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ class Provenance(str, Enum):
 @dataclass
 class QCConfig:
     # ---- context -----------------------------------------------------------
-    population: str = "adult"       # see for_population(): neonate_term, child, adult, elderly...
+    population: str = "adult"       # see for_population(): "adult" | "neonate"
     organ: str = "brain"            # brain | kidney (kidney profile is a stub, see ORGANS)
     strict: bool = True             # False -> demote uncalibrated FAILs to WARN (clinical cohorts)
 
@@ -339,51 +341,30 @@ def uncalibrated_fields() -> list[str]:
 # ---------------------------------------------------------------------------
 # Population profiles
 # ---------------------------------------------------------------------------
-# CBF norms per age group. Sources (all verified against the papers):
-#   neonate  Miranda MJ, et al. Pediatr Res 2006;60(3):359-363 - term: cortical GM 16,
-#            deep GM 30, WM 10; preterm@TEA: 19 / 39 / 15.
-#   child /
-#   teen /
-#   adult    Biagi L, et al. JMRI 2007;25(4):696-702. doi:10.1002/jmri.20839 -
-#            GM 97+/-5 (children), 79+/-3 (teens), 58+/-4 (adults);
-#            WM 26+/-1, 22+/-1, 20+/-1.
-#   elderly  Leoni RF, et al. Braz J Med Biol Res 2017;50(4):e5670 - GM 46+/-9 (age 64+/-8)
-#            vs 57+/-8 in young adults. Chen JJ, et al. NeuroImage 2011;55(2):468-478 -
-#            cortical CBF declines ~0.38%/year independent of atrophy.
+# CBF norms per supported population. v1.0 scope is deliberately tight: `adult`
+# is the brain target, and `neonate` is the mentor's neonatal domain. Other age
+# groups (infant / child / adolescent / elderly) are PLANNED but not shipped -
+# their bands were engineering extrapolations, not yet calibrated with the
+# mentors, so exposing them would over-state validated support. They live only in
+# THRESHOLD_PROVENANCE.md's "planned" section until confirmed.
 #
-# The BANDS are our engineering widening of those measured means (roughly mean +/- 2SD,
-# or the span between reported groups). The MEANS are published; the CUTOFFS are not.
+# Sources (verified against the papers):
+#   adult    Alsop DC, et al. MRM 2015;73(1):102-116 (ASL White Paper), p.17 -
+#            "gray matter CBF from 40-100 ml/min/100ml can be normal"; WM
+#            15.8-27.5 (Wu W-C, et al. PLoS One 2013;8(12):e82679).
+#   neonate  Miranda MJ, Olofsson K, Sidaros K. Pediatr Res 2006;60(3):359-363.
+#            doi:10.1203/01.PDR.0000232785.00965.B3 - term: cortical GM 16, deep
+#            GM 30, WM 10 mL/100g/min; preterm@TEA: 19 / 39 / 15. One 'neonate'
+#            band spans both term and preterm.
+#
+# The BANDS are our engineering widening of those measured means; the MEANS are
+# published, the CUTOFFS are not (see THRESHOLD_PROVENANCE.md).
 POPULATIONS: dict[str, dict] = {
-    "neonate_term": dict(
-        gm_cbf_lo=8.0, gm_cbf_hi=30.0, gm_cbf_fail_lo=2.0, gm_cbf_fail_hi=60.0,
-        wm_cbf_lo=5.0, wm_cbf_hi=20.0, wm_cbf_fail_lo=1.0, wm_cbf_fail_hi=35.0,
-        ratio_pass=1.2, ratio_min=0.9,
-    ),
-    "neonate_preterm": dict(
-        gm_cbf_lo=8.0, gm_cbf_hi=32.0, gm_cbf_fail_lo=2.0, gm_cbf_fail_hi=60.0,
-        wm_cbf_lo=6.0, wm_cbf_hi=24.0, wm_cbf_fail_lo=1.0, wm_cbf_fail_hi=40.0,
-        ratio_pass=1.1, ratio_min=0.8,
-    ),
-    "infant": dict(
-        gm_cbf_lo=20.0, gm_cbf_hi=60.0, gm_cbf_fail_lo=5.0, gm_cbf_fail_hi=90.0,
-        wm_cbf_lo=8.0, wm_cbf_hi=30.0, wm_cbf_fail_lo=2.0, wm_cbf_fail_hi=45.0,
-        ratio_pass=1.3, ratio_min=1.0,
-    ),
-    "child": dict(
-        gm_cbf_lo=70.0, gm_cbf_hi=125.0, gm_cbf_fail_lo=25.0, gm_cbf_fail_hi=180.0,
-        wm_cbf_lo=18.0, wm_cbf_hi=36.0, wm_cbf_fail_lo=8.0, wm_cbf_fail_hi=60.0,
-        ratio_pass=2.0, ratio_min=1.0,
-    ),
-    "adolescent": dict(
-        gm_cbf_lo=60.0, gm_cbf_hi=105.0, gm_cbf_fail_lo=20.0, gm_cbf_fail_hi=160.0,
-        wm_cbf_lo=15.0, wm_cbf_hi=32.0, wm_cbf_fail_lo=6.0, wm_cbf_fail_hi=55.0,
-        ratio_pass=2.0, ratio_min=1.0,
-    ),
     "adult": dict(),  # the dataclass defaults (White Paper 40-100)
-    "elderly": dict(
-        gm_cbf_lo=30.0, gm_cbf_hi=80.0, gm_cbf_fail_lo=8.0, gm_cbf_fail_hi=130.0,
-        wm_cbf_lo=12.0, wm_cbf_hi=28.0, wm_cbf_fail_lo=4.0, wm_cbf_fail_hi=50.0,
-        ratio_pass=1.3, ratio_min=1.0,   # ratio declines ~0.79%/yr (Parkes 2004)
+    "neonate": dict(
+        gm_cbf_lo=8.0, gm_cbf_hi=32.0, gm_cbf_fail_lo=2.0, gm_cbf_fail_hi=60.0,
+        wm_cbf_lo=5.0, wm_cbf_hi=24.0, wm_cbf_fail_lo=1.0, wm_cbf_fail_hi=40.0,
+        ratio_pass=1.1, ratio_min=0.8,
     ),
 }
 
@@ -410,7 +391,7 @@ ORGANS: dict[str, dict] = {
 
 
 def for_population(name: str, **overrides) -> QCConfig:
-    """Config tuned to an age group, e.g. for_population('neonate_term').
+    """Config tuned to a population, e.g. for_population('neonate').
 
     Raises on an unknown name rather than silently returning adult bands - a
     silent adult default on a neonate would fail every scan.

@@ -57,8 +57,7 @@ def main(argv=None) -> int:
     ap.add_argument("--html", metavar="PATH",
                     help="write a self-contained visual HTML report to PATH")
     ap.add_argument("--population", default="adult",
-                    help="age group for the CBF bands: neonate_term, neonate_preterm, "
-                         "infant, child, adolescent, adult, elderly (default: adult)")
+                    help="population for the CBF bands: adult or neonate (default: adult)")
     ap.add_argument("--serve", action="store_true",
                     help="local web UI: upload a single CBF map in the browser")
     ap.add_argument("--dashboard", metavar="FOLDER",

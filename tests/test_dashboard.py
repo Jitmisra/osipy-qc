@@ -187,9 +187,9 @@ def test_cfg_from_params_applies_overrides():
     from osipy_qc.batch import cfg_from_params
 
     base = QCConfig()
-    cfg = cfg_from_params(base, {"population": "child", "qei_pass": "0.7",
+    cfg = cfg_from_params(base, {"population": "neonate", "qei_pass": "0.7",
                                  "gm_cbf_lo": "70", "strict": "on"})
-    assert cfg.population == "child"          # population resets the bands...
+    assert cfg.population == "neonate"        # population resets the bands...
     assert cfg.qei_pass == 0.7                 # ...then overrides apply on top
     assert cfg.gm_cbf_lo == 70.0
     assert cfg.strict is True
@@ -254,15 +254,15 @@ def test_population_change_repopulates_fields_and_survives_apply():
     subs, summ, cfg = _cohort()
     h = render_overview(subs, summ, cfg, "demo")
     assert "applyPop(this.value)" in h                 # the handler is wired
-    assert '"gm_cbf_lo": 70.0' in h                     # child's GM band is embedded for the JS
+    assert '"gm_cbf_lo": 8.0' in h                      # neonate's GM band is embedded for the JS
 
-    # the round-trip the JS produces (child's own values submitted) must survive
+    # the round-trip the JS produces (neonate's own values submitted) must survive
     # cfg_from_params and NOT fall back to the adult 40:
-    child = for_population("child")
-    params = {name: str(getattr(child, name)) for name in TUNABLE}
-    params["population"] = "child"
+    neo = for_population("neonate")
+    params = {name: str(getattr(neo, name)) for name in TUNABLE}
+    params["population"] = "neonate"
     eff = cfg_from_params(QCConfig(), params)
-    assert eff.population == "child" and eff.gm_cbf_lo == 70.0
+    assert eff.population == "neonate" and eff.gm_cbf_lo == 8.0
 
 
 # --------------------------------------------------------------------------- #

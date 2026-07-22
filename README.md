@@ -283,11 +283,14 @@ osipy-qc --provenance      # every number, its source, and what that source says
 ```
 Full write-up: **[THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md)**.
 
-### Across the lifespan
-CBF norms move enormously with age (child GM ~97, adult ~58, neonate ~16
-mL/100g/min), so grading a neonate against adult bands would fail every scan.
-Pick the population — `--population neonate_term` on the CLI, or
-`for_population(...)` in Python. Sourced to Miranda 2006, Biagi 2007, Leoni 2017.
+### Adult and newborn
+Newborn CBF is far lower than adult (neonate GM ~16 vs adult ~58 mL/100g/min), so
+grading a neonate against adult bands would fail every scan. v1.0 ships two
+calibrated profiles — **adult** (the brain target) and **neonate** (the mentor's
+neonatal domain). Pick one with `--population neonate` on the CLI, or
+`for_population("neonate")` in Python. Adult = White Paper (Alsop 2015) + Wu 2013;
+neonate = Miranda 2006. Other age groups are planned once their bands are
+calibrated with the mentors (see POPULATION_BANDS.md).
 
 ---
 
