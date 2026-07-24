@@ -154,6 +154,7 @@ def subject_payload(subject: Subject) -> dict:
         "summary": d["summary"],
         "nChecks": d["n_checks"],
         "population": subject.cfg.population,
+        "qeiCutoff": _num(subject.cfg.qei_warn),
         "organ": subject.cfg.organ,
         "strict": bool(subject.cfg.strict),
         "drivers": drivers,

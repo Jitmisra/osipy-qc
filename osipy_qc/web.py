@@ -389,9 +389,7 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(target)[0] or "application/octet-stream"
         with open(target, "rb") as fh:
             raw = fh.read()
-        if not ctype.startswith("text/") and "javascript" not in ctype and "json" not in ctype:
-            ctype = ctype
-        else:
+        if ctype.startswith("text/") or "javascript" in ctype or "json" in ctype:
             ctype += "; charset=utf-8"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
