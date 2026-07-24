@@ -284,7 +284,7 @@ export default function Overview({ cohort, onOpenThresholds }) {
         </Card>
       </div>
 
-      <div className="mt-4 grid items-start gap-4 2xl:grid-cols-[minmax(0,440px)_1fr]">
+      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
         <QeiStrip subjects={cohort.subjects} cutoff={cohort.qeiCutoff} />
         <CheckMatrix matrix={cohort.matrix} subjects={cohort.subjects} />
       </div>

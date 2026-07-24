@@ -106,14 +106,17 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
 
         {subjects.length > 0 && (
           <div className="px-2.5 pb-6">
-            <div className="px-2.5 pb-1.5 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
-              Participants · {subjects.length}
+            <div className="flex items-baseline justify-between px-2.5 pb-1.5 pt-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
+                Participants
+              </span>
+              <span className="num font-mono text-[10px] text-[var(--color-faint)]">{subjects.length}</span>
             </div>
             {subjects.map((s) => (
               <NavLink
                 key={s.sid}
                 to={`/subject/${encodeURIComponent(s.sid)}`}
-                title={`${s.sid} — ${s.verdict}`}
+                title={`${s.sid} — ${s.verdict}${s.qei != null ? ` · QEI ${s.qei.toFixed(2)}` : ''}`}
                 className={({ isActive }) =>
                   `flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-[13px] transition-colors ${
                     isActive
@@ -123,7 +126,11 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
                 }
               >
                 <VerdictDot verdict={s.verdict} title={`${s.sid} — ${s.verdict}`} />
-                <span className="truncate">{s.sid}</span>
+                <span className="min-w-0 flex-1 truncate">{s.sid}</span>
+                {/* the anchor metric, so the list is scannable without leaving the page */}
+                <span className="num text-[11px] tabular-nums text-[var(--color-faint)]">
+                  {s.qei == null ? '—' : s.qei.toFixed(2)}
+                </span>
               </NavLink>
             ))}
           </div>

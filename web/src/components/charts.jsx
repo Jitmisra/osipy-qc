@@ -15,9 +15,9 @@ import { Card, SectionTitle, verdictOf, useTooltip } from '../lib/ui.jsx'
 export function QeiStrip({ subjects, cutoff = 0.5 }) {
   const tip = useTooltip()
   const W = 640
-  const H = 132
+  const H = 104
   const padX = 34
-  const baseY = 62
+  const baseY = 58
   const withQei = subjects.filter((s) => s.qei != null)
   const missing = subjects.length - withQei.length
   const x = (q) => padX + (W - 2 * padX) * Math.max(0, Math.min(1, q))
@@ -49,7 +49,7 @@ export function QeiStrip({ subjects, cutoff = 0.5 }) {
           <line x1={padX} y1={baseY} x2={W - padX} y2={baseY}
                 stroke="var(--color-line)" strokeWidth="2" strokeLinecap="round" />
           {[0, 0.5, 1].map((t) => (
-            <text key={t} x={x(t)} y={baseY + 20} textAnchor="middle"
+            <text key={t} x={x(t)} y={baseY + 19} textAnchor="middle"
                   fontSize="10" fill="var(--color-faint)" fontFamily="var(--font-mono)">
               {t}
             </text>
