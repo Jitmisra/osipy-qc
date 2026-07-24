@@ -96,14 +96,24 @@ def load_cbf_inputs(cbf: str, gm: str | None = None, wm: str | None = None,
         inputs["wm"] = _load(wm)
     if csf is not None:
         inputs["csf"] = _load(csf)
-    elif "gm" in inputs and "wm" in inputs:
-        inputs["csf"] = np.clip(1.0 - inputs["gm"] - inputs["wm"], 0.0, 1.0)
 
+    # validate the grid before deriving anything from it, so a mismatch reports
+    # the actionable "resample first" error rather than a broadcast failure
     for key in ("gm", "wm", "csf"):
         if key in inputs and inputs[key].shape != inputs["cbf"].shape:
             raise ValueError(
                 f"{key} shape {inputs[key].shape} != cbf shape {inputs['cbf'].shape} — "
                 "resample the tissue maps into ASL space first")
+
+    if csf is None and "gm" in inputs and "wm" in inputs:
+        # 1 - GM - WM is only CSF *inside the head*. Outside it GM and WM are both
+        # 0, so the complement is 1 everywhere in the air, and the QEI would pool
+        # the entire background into its within-tissue variance - which deflates
+        # the dispersion index and inflates the score. Restrict it to the voxels
+        # the CBF map actually covers.
+        derived = np.clip(1.0 - inputs["gm"] - inputs["wm"], 0.0, 1.0)
+        inputs["csf"] = derived * (np.asarray(inputs["cbf"], dtype=float) != 0)
+        inputs["csf_derived"] = True
     return inputs
 
 

@@ -92,3 +92,81 @@ def test_negative_gm_penalty_drops_qei():
         cbf2[z, y, x] = -abs(cbf2[z, y, x]) - 5
     worse = compute_qei(cbf2, case.gm, case.wm, case.csf, smooth=False)["qei"]
     assert worse < base
+
+
+# --------------------------------------------------------------------------- #
+# Regressions found by the 2026-07 codebase audit. Both bugs inflated the QEI,
+# i.e. they made bad scans look good - the worst direction for a QC tool to fail.
+# --------------------------------------------------------------------------- #
+def test_derived_csf_must_not_admit_the_air_background():
+    """When CSF is not supplied it is derived as 1 - GM - WM. Outside the head
+    GM and WM are both 0, so that complement is 1 across the whole background.
+    Pooling the air into the within-tissue variance deflates the dispersion index
+    and inflates the score, so the derived map has to be masked to the head."""
+    import numpy as np
+
+    from osipy_qc.checks.qei import qei_check
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="borderline", seed=3)
+    truth = qei_check(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf).metric["qei"]
+
+    unmasked = np.clip(1.0 - c.gm - c.wm, 0.0, 1.0)          # the old, wrong form
+    masked = unmasked * (c.cbf != 0)                          # what io.py now builds
+    q_unmasked = qei_check(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=unmasked).metric["qei"]
+    q_masked = qei_check(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=masked).metric["qei"]
+
+    assert int((unmasked > 0.7).sum()) > 5 * int((masked > 0.7).sum())
+    assert q_unmasked > truth + 0.04, "the unmasked form should visibly inflate the score"
+    assert abs(q_masked - truth) < 0.02, "the masked form should track the true CSF result"
+
+
+def test_load_cbf_inputs_masks_the_derived_csf_to_the_head(tmp_path):
+    import nibabel as nib
+    import numpy as np
+
+    from osipy_qc.io import load_cbf_inputs
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="clean", seed=0)
+    aff = np.diag([3.0, 3.0, 3.0, 1.0])
+
+    def w(name, arr):
+        p = tmp_path / name
+        nib.save(nib.Nifti1Image(arr.astype(np.float32), aff), p)
+        return str(p)
+
+    got = load_cbf_inputs(w("cbf.nii.gz", c.cbf), w("gm.nii.gz", c.gm), w("wm.nii.gz", c.wm))
+    assert got["csf_derived"] is True
+    # nothing outside the imaged volume may be called CSF
+    assert not np.any(got["csf"][np.asarray(c.cbf) == 0])
+
+
+def test_degenerate_tissue_masks_report_unknown_rather_than_a_high_score():
+    """An empty GM mask sends both penalty terms to their best value (a
+    dispersion of 0 and a negative fraction of 0 both map to 1.0), so the old
+    fallback handed the worst-prepared scans the highest QEI."""
+    from osipy_qc.checks.qei import qei_check
+    from osipy_qc.core import Verdict
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="borderline", seed=3)
+    # scaled below the 0.7 tissue threshold: the maps exist but select nothing
+    r = qei_check(cbf=c.cbf, gm=c.gm * 0.6, wm=c.wm * 0.6, csf=c.csf * 0.6)
+    assert r.verdict is Verdict.UNKNOWN
+    assert r.metric["qei"] is None
+    assert r.metric["n_gm"] == 0
+    assert "misaligned" in r.reason
+
+
+def test_a_zero_cbf_map_with_valid_masks_is_unknown_not_scored():
+    """Mean GM CBF of zero makes the dispersion index undefined."""
+    import numpy as np
+
+    from osipy_qc.checks.qei import qei_check
+    from osipy_qc.core import Verdict
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="clean", seed=0)
+    r = qei_check(cbf=np.zeros_like(c.cbf), gm=c.gm, wm=c.wm, csf=c.csf)
+    assert r.verdict is Verdict.UNKNOWN

@@ -52,14 +52,32 @@ def compute_qei(cbf, gm, wm, csf, cfg: QCConfig = QCConfig(),
     wm_mask = threshold_prob(wm, cfg.tissue_thresh)
     csf_mask = threshold_prob(csf, cfg.tissue_thresh)
     gm_vals = cbf[gm_mask]
+    n_gm = int(gm_vals.size)
+    mean_gm = float(np.mean(gm_vals)) if n_gm else 0.0
+
+    # A degenerate mask must not be scored. Both penalty terms below take their
+    # BEST value when the mask is empty (a dispersion of 0 and a negative
+    # fraction of 0 both map to 1.0), so silently falling back would hand the
+    # worst-prepared scans the highest QEI. Tissue maps that are misaligned, in
+    # the wrong scale, or resampled onto a coarse ASL grid all land here.
+    n_wm, n_csf = int(np.count_nonzero(wm_mask)), int(np.count_nonzero(csf_mask))
+    if n_gm <= 1 or n_wm <= 1 or n_csf <= 1 or abs(mean_gm) < 1e-6:
+        # Report the degeneracy instead of a score; the caller turns this into
+        # UNKNOWN. Returning a dict keeps compute_qei a pure metric function.
+        return {
+            "qei": None, "degenerate": True,
+            "n_gm": n_gm, "n_wm": n_wm, "n_csf": n_csf,
+            "tissue_thresh": cfg.tissue_thresh,
+            "mean_gm_cbf": round(mean_gm, 4),
+            "rho_ss": round(rho, 4),
+        }
+
     var_pool = pooled_within_tissue_variance([gm_vals, cbf[wm_mask], cbf[csf_mask]])
-    mean_gm = float(np.mean(gm_vals)) if gm_vals.size else 0.0
-    di = var_pool / abs(mean_gm) if mean_gm != 0 else 0.0
+    di = var_pool / abs(mean_gm)
 
     # --- negative-GM fraction (p) ---
-    n_gm = int(gm_vals.size)
     n_neg = int(np.count_nonzero(gm_vals < 0))
-    p = (n_neg / n_gm) if n_gm else 0.0
+    p = n_neg / n_gm
 
     # --- combine ---
     f1 = 1.0 - np.exp(-cfg.qei_a * rho ** cfg.qei_b)
@@ -88,6 +106,12 @@ def qei_check(cbf=None, gm=None, wm=None, csf=None, cfg: QCConfig = QCConfig(),
         return CheckResult("1.qei", Verdict.UNKNOWN,
                            reason="needs CBF map + GM/WM/CSF tissue maps in ASL space")
     m = compute_qei(cbf, gm, wm, csf, cfg, voxel_mm)
+    if m.get("degenerate"):
+        return CheckResult(
+            "1.qei", Verdict.UNKNOWN, metric=m,
+            reason=(f"cannot score: {m['n_gm']} GM, {m['n_wm']} WM, {m['n_csf']} CSF "
+                    f"voxels above probability {cfg.tissue_thresh:g} - the tissue maps "
+                    "may be misaligned, empty, or on a different scale"))
     q = m["qei"]
     if q >= cfg.qei_pass:
         v, why = Verdict.PASS, f"QEI {q} (>= {cfg.qei_pass})"
