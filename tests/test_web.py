@@ -127,7 +127,7 @@ def _serve():
 def test_get_serves_the_upload_page():
     srv, base = _serve()
     try:
-        body = urllib.request.urlopen(base + "/").read().decode()
+        body = urllib.request.urlopen(base + "/legacy/upload").read().decode()
         assert "<form" in body and 'action="/run"' in body and 'method="post"' in body
         assert 'name="cbf"' in body                 # the upload field is present
     finally:
@@ -137,7 +137,8 @@ def test_get_serves_the_upload_page():
 def test_unknown_path_is_404():
     srv, base = _serve()
     try:
-        urllib.request.urlopen(base + "/nope")
+        # a path that looks like a file but does not exist is a missing asset
+        urllib.request.urlopen(base + "/nope.js")
     except urllib.error.HTTPError as e:
         assert e.code == 404
     else:

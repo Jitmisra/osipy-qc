@@ -153,7 +153,7 @@ def _serve_dashboard():
 def test_server_serves_overview_at_root():
     srv, base, _ = _serve_dashboard()
     try:
-        body = urllib.request.urlopen(base + "/").read().decode()
+        body = urllib.request.urlopen(base + "/legacy/").read().decode()
         assert "Batch overview" in body
     finally:
         srv.shutdown()
@@ -162,7 +162,7 @@ def test_server_serves_overview_at_root():
 def test_server_serves_each_subject():
     srv, base, subs = _serve_dashboard()
     try:
-        body = urllib.request.urlopen(base + f"/subject/{subs[0].sid}").read().decode()
+        body = urllib.request.urlopen(base + f"/legacy/subject/{subs[0].sid}").read().decode()
         assert subs[0].sid in body and "OVERALL VERDICT" in body
     finally:
         srv.shutdown()
@@ -171,7 +171,7 @@ def test_server_serves_each_subject():
 def test_server_404s_unknown_subject():
     srv, base, _ = _serve_dashboard()
     try:
-        urllib.request.urlopen(base + "/subject/sub-999")
+        urllib.request.urlopen(base + "/legacy/subject/sub-999")
     except urllib.error.HTTPError as e:
         assert e.code == 404
     else:
@@ -218,7 +218,7 @@ def test_apply_route_stores_overrides_and_regrades():
         # apply an impossible QEI cutoff -> pass rate must drop to 0
         opener = urllib.request.build_opener()
         opener.open(base + "/apply?qei_warn=0.999&qei_pass=0.999&back=/")
-        body = opener.open(base + "/").read().decode()
+        body = opener.open(base + "/legacy/").read().decode()
         assert "custom thresholds" in body          # the applied-badge shows
         # the overview now reflects the re-grade (0% pass)
         assert "Pass rate" in body
@@ -338,7 +338,7 @@ def test_safe_back_blocks_open_redirect_and_crlf():
 def test_404_is_a_styled_page_not_a_bare_tag():
     srv, base, _ = _serve_dashboard()
     try:
-        urllib.request.urlopen(base + "/subject/does-not-exist")
+        urllib.request.urlopen(base + "/legacy/subject/does-not-exist")
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         assert e.code == 404

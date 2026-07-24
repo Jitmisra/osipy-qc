@@ -22,3 +22,6 @@ output/*
 # never commit real / patient data, wherever it lands
 Data_for_Agnik/
 *_S_*.nii.gz
+
+# the frontend build is produced by `npm --prefix web run build`
+web/node_modules/

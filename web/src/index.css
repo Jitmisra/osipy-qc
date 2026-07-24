@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/*
+  Design tokens. The brand palette follows the OSIPI QC-ToolBox proposal (warm
+  paper, terracotta accent). The verdict colours are a *status* palette, kept
+  separate from any decorative hue and validated for colour-vision deficiency;
+  every verdict also carries a glyph and a text label, so status is never
+  conveyed by colour alone.
+*/
+@theme {
+  --color-paper: #faf8f5;
+  --color-surface: #ffffff;
+  --color-well: #f2ede6;
+  --color-line: #e6e0d9;
+  --color-ink: #1b1a19;
+  --color-muted: #6c6660;
+  --color-faint: #98918a;
+
+  --color-accent: #ac4d2a;
+  --color-accent-600: #8d3d1f;
+  --color-accent-050: #fbeee6;
+
+  --color-pass: #0b8a6b;
+  --color-warn: #b8820a;
+  --color-fail: #b01030;
+  --color-info: #2563c9;
+  --color-none: #78716c;
+
+  --color-pass-tint: #e3f4ee;
+  --color-warn-tint: #fbf0d6;
+  --color-fail-tint: #fce4e8;
+  --color-info-tint: #e6eefb;
+  --color-none-tint: #eeebe7;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-card: 14px;
+}
+
+/* Dark mode is a deliberate second theme with its own steps, not an inversion. */
+:root[data-theme="dark"] {
+  --color-paper: #131211;
+  --color-surface: #1c1a19;
+  --color-well: #262322;
+  --color-line: #322e2c;
+  --color-ink: #f2eee9;
+  --color-muted: #a9a29b;
+  --color-faint: #7d766f;
+
+  --color-accent: #d9764e;
+  --color-accent-600: #e8906b;
+  --color-accent-050: #2c1d16;
+
+  --color-pass: #2fae8b;
+  --color-warn: #d4a017;
+  --color-fail: #e05c74;
+  --color-info: #6699ee;
+  --color-none: #8a827a;
+
+  --color-pass-tint: #122b25;
+  --color-warn-tint: #2d2410;
+  --color-fail-tint: #331a20;
+  --color-info-tint: #16213a;
+  --color-none-tint: #24211f;
+}
+
+html {
+  background: var(--color-paper);
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+::selection { background: var(--color-accent-050); }
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* thin, unobtrusive scrollbars so dense tables stay calm */
+* { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* the app chrome is for screen only; printing yields the report itself */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  main { padding: 0 !important; }
+}

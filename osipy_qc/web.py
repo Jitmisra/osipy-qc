@@ -342,6 +342,129 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.end_headers()
 
+    # ---- JSON API plumbing ------------------------------------------------ #
+    def _send_json(self, obj, status: int = 200) -> None:
+        import json
+        raw = json.dumps(obj).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _send_bytes(self, raw: bytes, ctype: str, status: int = 200) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _serve_spa(self, path: str) -> bool:
+        """Serve the built React app from web/dist, if it has been built.
+
+        Returns True if the request was handled.
+
+        A path that looks like a file (it has an extension) but does not exist is
+        a genuinely missing asset, so it 404s. Anything else is treated as a
+        client-side route and gets index.html, which is what makes a deep link
+        survive a hard refresh.
+        """
+        import mimetypes
+        import os
+        import posixpath
+
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "web", "dist")
+        index = os.path.join(root, "index.html")
+        if not os.path.isfile(index):
+            return False
+        rel = path.lstrip("/") or "index.html"
+        target = os.path.normpath(os.path.join(root, rel))
+        # never serve outside the build directory
+        if not target.startswith(root) or not os.path.isfile(target):
+            if "." in posixpath.basename(path):
+                return False            # a missing asset, not a route
+            target = index
+        ctype = mimetypes.guess_type(target)[0] or "application/octet-stream"
+        with open(target, "rb") as fh:
+            raw = fh.read()
+        if not ctype.startswith("text/") and "javascript" not in ctype and "json" not in ctype:
+            ctype = ctype
+        else:
+            ctype += "; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        # hashed asset filenames are immutable; index.html must not be cached
+        self.send_header("Cache-Control",
+                         "no-store" if target == index else "public, max-age=31536000, immutable")
+        self.end_headers()
+        self.wfile.write(raw)
+        return True
+
+    def _api(self, path: str, query: dict, batch: dict | None) -> bool:
+        """Handle an /api/... GET. Returns True if the route matched."""
+        from . import api as apimod
+
+        if path == "/api/health":
+            self._send_json({"ok": True, "hasCohort": batch is not None})
+            return True
+
+        if path == "/api/provenance":
+            self._send_json(apimod.provenance_payload())
+            return True
+
+        if path == "/api/checks":
+            self._send_json(apimod.checks_catalogue())
+            return True
+
+        if batch is None:
+            # single-scan mode: no cohort loaded
+            if path.startswith("/api/"):
+                self._send_json({"error": "no cohort loaded; start with --dashboard"}, 404)
+                return True
+            return False
+
+        if path == "/api/cohort":
+            subjects, summary, cfg = self._effective(batch)
+            self._send_json(apimod.cohort_payload(
+                subjects, summary, cfg, batch.get("dataset", "cohort"),
+                batch.get("overrides") or {}))
+            return True
+
+        if path == "/api/config":
+            _subjects, _summary, cfg = self._effective(batch)
+            self._send_json(apimod.config_payload(cfg, batch.get("overrides") or {}))
+            return True
+
+        if path.startswith("/api/subject/"):
+            import urllib.parse as up
+            rest = up.unquote(path[len("/api/subject/"):])
+            subjects, _summary, _cfg = self._effective(batch)
+            if "/figure/" in rest:
+                sid, fig = rest.split("/figure/", 1)
+                sub = next((s for s in subjects if s.sid == sid), None)
+                if sub is None:
+                    self._send_json({"error": f"unknown subject {sid}"}, 404)
+                    return True
+                try:
+                    raw, ctype = apimod.figure_bytes(sub, fig.rsplit(".", 1)[0])
+                except KeyError:
+                    self._send_json({"error": f"unknown figure {fig}"}, 404)
+                    return True
+                self._send_bytes(raw, ctype)
+                return True
+            sub = next((s for s in subjects if s.sid == rest), None)
+            if sub is None:
+                self._send_json({"error": f"unknown subject {rest}"}, 404)
+                return True
+            self._send_json(apimod.subject_payload(sub))
+            return True
+
+        self._send_json({"error": "unknown endpoint"}, 404)
+        return True
+
     def _effective(self, batch: dict):
         """(subjects, summary, cfg) for the currently applied overrides, memoised
         so images are only re-rendered when the config actually changes."""
@@ -371,11 +494,23 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             parsed = up.urlparse(self.path)
             path, query = parsed.path, up.parse_qs(parsed.query)
 
+            # the JSON API the React client consumes
+            if path.startswith("/api/") and self._api(path, query, batch):
+                return
+
             # apply a config change, then bounce back to where the user was
             if batch and path == "/apply":
                 batch["overrides"] = {k: v[0] for k, v in query.items() if k != "back"}
                 self._redirect(_safe_back(query.get("back", ["/"])[0]))
                 return
+
+            # the built React app owns the UI when it is present; the
+            # server-rendered pages below stay as the no-build fallback
+            if not path.startswith("/legacy") and self._serve_spa(path):
+                return
+
+            if path.startswith("/legacy"):
+                path = path[len("/legacy"):] or "/"
 
             if batch and path in ("/", "/index.html"):
                 from .dashboard_html import render_overview
@@ -404,6 +539,35 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         if not self._host_ok():
             self._send(_error_page(403, "Cross-origin request refused."), 403)
             return
+
+        # apply threshold overrides from the React client and re-grade
+        if self.path == "/api/config":
+            import json
+
+            from . import api as apimod
+            batch = getattr(self.server, "batch", None)
+            if batch is None:
+                self._send_json({"error": "no cohort loaded"}, 404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length) if length else b"{}"
+                payload = json.loads(body or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("expected a JSON object")
+                # only known config fields may be set, and only as scalars
+                allowed = set(apimod.config_fields())
+                overrides = {k: str(v) for k, v in payload.items()
+                             if k in allowed and not isinstance(v, (dict, list))}
+                batch["overrides"] = overrides
+                subjects, summary, cfg = self._effective(batch)
+                self._send_json(apimod.cohort_payload(
+                    subjects, summary, cfg, batch.get("dataset", "cohort"), overrides))
+            except Exception as exc:
+                traceback.print_exc()
+                self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            return
+
         if self.path != "/run":
             self._send(_error_page(404, "That page does not exist."), 404)
             return
