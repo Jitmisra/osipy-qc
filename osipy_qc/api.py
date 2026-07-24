@@ -26,7 +26,8 @@ from .batch import TUNABLE_GROUPS, BatchSummary, Subject, check_label
 from .core.config import (POPULATIONS, THRESHOLD_PROVENANCE, QCConfig,
                           provenance_of)
 from .core.registry import all_checks
-from .utils.imaging import encode_png, histogram_svg, slice_mosaic
+from .utils.imaging import (encode_png, histogram_svg, mosaic_window,
+                            ramp_stops, slice_mosaic)
 from .utils.masks import covered_tissue_mask
 
 #: Stream id -> the human name used in the UI.
@@ -139,20 +140,34 @@ def _kpis(by: dict[str, dict], cfg: QCConfig) -> list[dict]:
 
 
 def _figure_list(inputs: dict) -> list[dict]:
-    """Which figures can be rendered for this subject, given its inputs."""
+    """Which figures can be rendered for this subject, given its inputs.
+
+    Image figures carry the intensity window they were rendered with. The window
+    is per-scan (2nd-98th percentile), so without it the colours have no units
+    and are silently not comparable between scans.
+    """
     figs = []
-    if inputs.get("cbf") is not None:
-        figs.append({"name": "cbf", "kind": "png", "title": "CBF map",
+    cbf = inputs.get("cbf")
+    win = None
+    if cbf is not None:
+        lo, hi = mosaic_window(cbf)
+        win = {"vmin": _num(lo), "vmax": _num(hi), "unit": "mL/100g/min",
+               "ramp": [{"at": t, "color": c} for t, c in ramp_stops()],
+               "note": "windowed to this scan's 2nd-98th percentile, so colours "
+                       "are not comparable between scans"}
+    if cbf is not None:
+        figs.append({"name": "cbf", "kind": "png", "title": "CBF map", "window": win,
                      "caption": "Evenly spaced axial slices. Blue marks negative CBF, "
                                 "which is non-physical and indicates noise or a subtraction artefact."})
     if inputs.get("cbf") is not None and inputs.get("gm") is not None:
         figs.append({"name": "gm_hist", "kind": "svg", "title": "Grey-matter CBF distribution",
-                     "caption": "Shaded band is the expected range for this population."})
+                     "caption": "The shaded band is the expected range for this population. If that range falls outside the plotted values, the chart says so instead."})
         figs.append({"name": "gm_masked", "kind": "png", "title": "CBF inside the GM mask",
+                     "window": win,
                      "caption": "Gaps mean the mask covers voxels the ASL never imaged."})
     if inputs.get("cbf") is not None and inputs.get("wm") is not None:
         figs.append({"name": "wm_hist", "kind": "svg", "title": "White-matter CBF distribution",
-                     "caption": "Shaded band is the expected white-matter range."})
+                     "caption": "The shaded band is the expected white-matter range. If that range falls outside the plotted values, the chart says so instead."})
     return figs
 
 

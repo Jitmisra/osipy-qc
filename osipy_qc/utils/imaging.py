@@ -93,6 +93,29 @@ def colorise(slice2d: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     return rgb
 
 
+def mosaic_window(volume: np.ndarray) -> tuple[float, float]:
+    """The (vmin, vmax) `slice_mosaic` would use for this volume.
+
+    Exposed so a caller can label the colour scale. Without it the mosaic is a
+    pretty picture with no units, and because the window is per-scan the colours
+    are not comparable between scans - a fact the reader has to be told.
+    """
+    vol = np.asarray(volume, dtype=float)
+    if vol.ndim == 4:
+        vol = vol.mean(axis=3)
+    vol = np.where(np.isfinite(vol), vol, 0.0)
+    nz = vol[vol != 0]
+    if not nz.size:
+        return 0.0, 1.0
+    lo, hi = float(np.percentile(nz, 2)), float(np.percentile(nz, 98))
+    return (lo, hi if hi > lo else lo + 1.0)
+
+
+def ramp_stops() -> list[tuple[float, str]]:
+    """The perfusion colour ramp as (offset, #rrggbb), for drawing a colourbar."""
+    return [(t, "#%02x%02x%02x" % rgb) for t, rgb in _HOT]
+
+
 def slice_mosaic(volume: np.ndarray, n: int = 12, cols: int = 6,
                  vmin: float | None = None, vmax: float | None = None) -> np.ndarray:
     """A grid of evenly-spaced axial slices through a 3-D volume -> RGB.
@@ -164,12 +187,27 @@ def histogram_svg(values: np.ndarray, bins: int = 40, width: int = 520,
              'xmlns="http://www.w3.org/2000/svg" role="img">',
              f'<title>{_esc(label)} distribution</title>']
 
-    # expected-range shading, behind everything
+    # Expected-range shading, behind everything.
+    #
+    # If the band falls entirely outside the plotted range the shading would be
+    # clipped to nothing, leaving a caption that promises an expected range the
+    # reader cannot see - on a badly scaled map that reads as a healthy
+    # distribution. Draw an explicit off-scale marker instead of omitting it.
     for blo, bhi, colour in (bands or []):
         bx0, bx1 = sx(max(blo, lo)), sx(min(bhi, hi))
         if bx1 > bx0:
             parts.append(f'<rect x="{bx0:.1f}" y="{y0}" width="{bx1-bx0:.1f}" '
                          f'height="{ph}" fill="{colour}" opacity="0.5"/>')
+        else:
+            left = bhi <= lo
+            ex = x0 + 2 if left else x0 + pw - 2
+            parts.append(
+                f'<line x1="{ex:.1f}" y1="{y0}" x2="{ex:.1f}" y2="{y0+ph}" '
+                f'stroke="#0B8A6B" stroke-width="2" stroke-dasharray="3 3"/>'
+                f'<text x="{(x0 + 8) if left else (x0 + pw - 8):.1f}" y="{y0+12}" '
+                f'text-anchor="{"start" if left else "end"}" font-size="9" fill="#0B8A6B" '
+                f'font-family="monospace">expected {blo:g}–{bhi:g} '
+                f'{"◂" if left else "▸"} off scale</text>')
 
     # bars
     bw = pw / len(counts)

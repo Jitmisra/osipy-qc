@@ -247,7 +247,7 @@ export default function Subject({ cohort }) {
             {data.figures.map((f) => {
               const src = figureUrl(data.sid, `${f.name}.${f.kind === 'png' ? 'png' : 'svg'}`)
               return (
-                <Card key={f.name} className="overflow-hidden">
+                <Card key={f.name} className="overflow-hidden shadow-[var(--shadow-e1)]">
                   <button
                     onClick={() => setZoom({ src, alt: f.title })}
                     className="block w-full cursor-zoom-in"
@@ -256,9 +256,33 @@ export default function Subject({ cohort }) {
                     <img src={src} alt={f.title} loading="lazy"
                          className={`block h-auto w-full ${f.kind === 'png' ? 'bg-[#0b0a09]' : 'bg-[var(--color-surface)] p-1'}`} />
                   </button>
+                  {/* The window is per-scan, so without a labelled scale the
+                      colours have no units and are quietly incomparable. */}
+                  {f.window && (
+                    <div className="px-3 pt-2.5">
+                      <div
+                        className="h-2 w-full rounded-full"
+                        style={{
+                          background: `linear-gradient(90deg, ${f.window.ramp
+                            .map((r) => `${r.color} ${r.at * 100}%`)
+                            .join(', ')})`,
+                        }}
+                      />
+                      <div className="num mt-1 flex justify-between font-mono text-[10px] text-[var(--color-faint)]">
+                        <span>{Math.round(f.window.vmin).toLocaleString()}</span>
+                        <span>{f.window.unit}</span>
+                        <span>{Math.round(f.window.vmax).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="border-t border-[var(--color-line)] p-3">
                     <div className="text-[13px] font-semibold">{f.title}</div>
                     <p className="mt-0.5 text-[12px] leading-snug text-[var(--color-muted)]">{f.caption}</p>
+                    {f.window && (
+                      <p className="mt-1 text-[11px] leading-snug text-[var(--color-faint)]">
+                        {f.window.note}
+                      </p>
+                    )}
                   </div>
                 </Card>
               )
