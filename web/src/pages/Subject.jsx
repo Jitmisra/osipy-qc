@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fetchSubject, figureUrl } from '../lib/api.js'
 import {
-  Card, SectionTitle, Button, VerdictPill, Spinner, ErrorNote, Lightbox, verdictOf,
+  Card, SectionTitle, Button, VerdictPill, SubjectSkeleton, ErrorNote, Lightbox,
+  BandMeter, verdictOf,
 } from '../lib/ui.jsx'
-import { QeiGauge } from '../components/charts.jsx'
 
 const GLOSS = {
   PASS: 'This scan looks usable. Every applicable check passed.',
@@ -98,7 +98,7 @@ export default function Subject({ cohort }) {
   }, [cohort, sid])
 
   if (error) return <ErrorNote error={error} hint="Check that this participant exists in the loaded cohort." />
-  if (!data) return <Spinner label={`Loading ${sid}`} />
+  if (!data) return <SubjectSkeleton />
 
   const v = verdictOf(data.verdict)
   const byStream = data.checks.reduce((acc, c) => {
@@ -168,37 +168,48 @@ export default function Subject({ cohort }) {
         )}
       </Card>
 
-      {/* headline measurements */}
+      {/* Headline measurements. Every tile shows the value AND where it sits in
+          the range it was graded against - a bare number says nothing about
+          whether it is fine or catastrophic. */}
       {data.kpis.length > 0 && (
-        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           {data.kpis.map((k) => {
             const kv = verdictOf(k.verdict)
-            const isQei = k.key === 'qei'
+            const text = k.format === '0.000' ? k.value.toFixed(3)
+              : k.format === '0.00' ? k.value.toFixed(2)
+              : k.format === '0.0' ? k.value.toFixed(1)
+              : Math.round(k.value).toLocaleString()
             return (
-              <Card
-                key={k.key}
-                className={`flex flex-col p-4 ${isQei ? 'items-center justify-center text-center' : 'justify-center'}`}
-              >
-                {isQei && <QeiGauge value={k.value} cutoff={data.qeiCutoff ?? 0.5} verdict={k.verdict} />}
-                <div>
-                  <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
+              <Card key={k.key} className="flex flex-col p-4 shadow-[var(--shadow-e1)]">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
                     {k.label}
-                  </div>
-                  <div className="mt-1 flex items-baseline gap-1" style={{ justifyContent: isQei ? 'center' : undefined }}>
-                    <span className="text-[26px] font-bold leading-none tabular-nums" style={{ color: kv.fg }}>
-                      {k.format === '0.000' ? k.value.toFixed(3)
-                        : k.format === '0.00' ? k.value.toFixed(2)
-                        : k.format === '0.0' ? k.value.toFixed(1)
-                        : Math.round(k.value)}
-                    </span>
-                    {k.unit && <span className="text-xs text-[var(--color-muted)]">{k.unit}</span>}
-                  </div>
-                  <div className="mt-1 text-[11px] text-[var(--color-faint)]">{k.foot}</div>
+                  </span>
+                  <span
+                    aria-label={k.verdict}
+                    title={k.verdict}
+                    className="mt-0.5 inline-block h-1.5 w-1.5 flex-none rounded-full"
+                    style={{ background: kv.fg }}
+                  />
                 </div>
+                <div className="mt-1.5 flex items-baseline gap-1">
+                  <span className="num truncate text-[25px] font-bold leading-none" style={{ color: kv.fg }}>
+                    {text}
+                  </span>
+                  {k.unit && <span className="text-[11px] text-[var(--color-muted)]">{k.unit}</span>}
+                </div>
+                <BandMeter value={k.value} band={k.band} axis={k.axis} color={kv.fg} />
+                <div className="mt-2 text-[11px] leading-snug text-[var(--color-faint)]">{k.foot}</div>
               </Card>
             )
           })}
         </div>
+      )}
+      {data.kpis.length > 0 && (
+        <p className="-mt-4 mb-6 text-[11.5px] text-[var(--color-faint)]">
+          The shaded stretch on each meter is the expected range; the marker is this scan.
+          An arrow means the value runs past the end of the scale.
+        </p>
       )}
 
       {/* findings before images: the checks are the diagnosis, the pictures are evidence */}

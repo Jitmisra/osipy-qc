@@ -10,7 +10,7 @@ import Overview from './pages/Overview.jsx'
 import Subject from './pages/Subject.jsx'
 import Methodology from './pages/Methodology.jsx'
 import Upload from './pages/Upload.jsx'
-import { Spinner, ErrorNote, EmptyState } from './lib/ui.jsx'
+import { OverviewSkeleton, ErrorNote, EmptyState } from './lib/ui.jsx'
 
 function App() {
   const [cohort, setCohort] = useState(null)
@@ -37,7 +37,7 @@ function App() {
         <Route
           path="/"
           element={
-            loading ? <Spinner label="Grading cohort" />
+            loading ? <OverviewSkeleton />
               : cohort ? <Overview cohort={cohort} onOpenThresholds={openThresholds} />
               : <NoCohort error={error} />
           }

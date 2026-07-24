@@ -97,10 +97,17 @@ def check_payload(res: dict, streams: dict[str, str] | None = None) -> dict:
 # subject
 # --------------------------------------------------------------------------- #
 def _kpis(by: dict[str, dict], cfg: QCConfig) -> list[dict]:
-    """The headline numbers, each carrying the verdict colour of its own check."""
+    """The headline numbers.
+
+    Each carries the verdict colour of its own check plus the range it is graded
+    against, so the UI can show *where* a value sits rather than just what it is:
+      band - the expected/good range for this population
+      axis - the scale to draw that range on, so a wildly out-of-band value is
+             visibly pinned past the end instead of silently rescaling the meter
+    """
     out: list[dict] = []
 
-    def add(check, key, label, unit, fmt, foot, scale=1.0):
+    def add(check, key, label, unit, fmt, foot, scale=1.0, band=None, axis=None):
         m = by.get(check, {}).get("metric") or {}
         v = m.get(key)
         if not isinstance(v, (int, float)) or isinstance(v, bool):
@@ -110,14 +117,24 @@ def _kpis(by: dict[str, dict], cfg: QCConfig) -> list[dict]:
             "unit": unit, "format": fmt, "foot": foot,
             "verdict": by.get(check, {}).get("verdict", "UNKNOWN"),
             "check": check,
+            "band": [_num(band[0]), _num(band[1])] if band else None,
+            "axis": [_num(axis[0]), _num(axis[1])] if axis else None,
         })
 
-    add("1.qei", "qei", "QEI", "", "0.000", f"cutoff {cfg.qei_warn:g}")
+    add("1.qei", "qei", "QEI", "", "0.000", f"cut-off {cfg.qei_warn:g}",
+        band=(cfg.qei_warn, 1.0), axis=(0.0, 1.0))
     add("3.1.cbf_level", "mean_gm_cbf", "GM CBF", "mL/100g/min", "0.0",
-        f"{cfg.population} band {cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g}")
-    add("3.2.gm_wm_ratio", "gm_wm_ratio", "GM / WM ratio", "", "0.00", "normal ~2–4")
-    add("2.1.spatial_cov", "sCoV_pct", "Spatial CoV", "%", "0.0", "transit-time proxy")
-    add("4.2.coverage", "gm_coverage", "GM coverage", "%", "0", "of the ROI imaged", scale=100.0)
+        f"{cfg.population} band {cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g}",
+        band=(cfg.gm_cbf_lo, cfg.gm_cbf_hi), axis=(0.0, cfg.gm_cbf_fail_hi))
+    add("3.2.gm_wm_ratio", "gm_wm_ratio", "GM / WM ratio", "", "0.00",
+        f"expected above {cfg.ratio_pass:g}",
+        band=(cfg.ratio_pass, 4.0), axis=(0.0, 5.0))
+    add("2.1.spatial_cov", "sCoV_pct", "Spatial CoV", "%", "0.0",
+        f"vascular above {cfg.scov_vascular * 100:g}%",
+        band=(0.0, cfg.scov_vascular * 100), axis=(0.0, cfg.scov_artifact * 100))
+    add("4.2.coverage", "gm_coverage", "GM coverage", "%", "0",
+        f"of the ROI imaged (want ≥ {cfg.coverage_warn * 100:g}%)", scale=100.0,
+        band=(cfg.coverage_warn * 100, 100.0), axis=(0.0, 100.0))
     return out
 
 

@@ -187,3 +187,126 @@ export function EmptyState({ title, children }) {
     </Card>
   )
 }
+
+/**
+ * Where a value sits relative to the range it is graded against.
+ *
+ * A bare number ("3472.8") tells a reader nothing about whether that is fine or
+ * catastrophic. The meter draws the expected band on a fixed axis and pins the
+ * marker at the edge when the value runs past it, so "far out of range" stays
+ * visible instead of the scale quietly stretching to accommodate it.
+ */
+export function BandMeter({ value, band, axis, color, className = '' }) {
+  if (!band || !axis || typeof value !== 'number') return null
+  const [amin, amax] = axis
+  const span = amax - amin || 1
+  const at = (v) => Math.max(0, Math.min(1, (v - amin) / span)) * 100
+  const over = value > amax
+  const under = value < amin
+  return (
+    <div className={`relative mt-2.5 h-1.5 rounded-full bg-[var(--color-well)] ${className}`}>
+      <div
+        className="absolute inset-y-0 rounded-full"
+        style={{
+          left: `${at(band[0])}%`,
+          right: `${100 - at(band[1])}%`,
+          background: 'var(--color-pass)',
+          opacity: 0.22,
+        }}
+      />
+      <div
+        className="absolute top-1/2 h-[11px] w-[3px] -translate-y-1/2 rounded-full ring-2 ring-[var(--color-surface)]"
+        style={{ left: `calc(${at(value)}% - 1.5px)`, background: color }}
+        title={`${value} (expected ${band[0]}–${band[1]})`}
+      />
+      {(over || under) && (
+        <span
+          aria-hidden="true"
+          className="absolute top-1/2 -translate-y-1/2 text-[10px] font-bold leading-none"
+          style={{ color, [over ? 'right' : 'left']: '-9px' }}
+        >
+          {over ? '▸' : '◂'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The cohort's verdict split as one bar. Replaces three separate percentage
+ * tiles: the proportions are the message, and a single bar shows them at a
+ * glance while still naming every count in text.
+ */
+export function VerdictBar({ counts, total, onSelect, active }) {
+  const order = ['FAIL', 'WARN', 'PASS']
+  const present = order.filter((k) => (counts[k] || 0) > 0)
+  return (
+    <div>
+      <div className="flex h-2.5 gap-[3px] overflow-hidden rounded-full">
+        {present.map((k) => {
+          const v = verdictOf(k)
+          const share = ((counts[k] || 0) / Math.max(total, 1)) * 100
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onSelect?.(active === k ? 'all' : k)}
+              aria-label={`${counts[k]} ${k} of ${total}`}
+              title={`${counts[k]} ${k} — click to filter`}
+              className="h-full rounded-full transition-opacity hover:opacity-80"
+              style={{ width: `${share}%`, background: v.fg, opacity: active && active !== k ? 0.3 : 1 }}
+            />
+          )
+        })}
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1">
+        {order.map((k) => {
+          const v = verdictOf(k)
+          const n = counts[k] || 0
+          return (
+            <span key={k} className="flex items-baseline gap-1.5 text-[13px]">
+              <span aria-hidden="true" className="inline-block h-2 w-2 translate-y-[-1px] rounded-full" style={{ background: v.fg }} />
+              <b className="num font-semibold" style={{ color: n ? v.fg : 'var(--color-faint)' }}>{n}</b>
+              <span className="text-[var(--color-muted)]">{v.label.toLowerCase()}</span>
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Placeholder that matches the shape of the real content, not a spinner. */
+export function Skeleton({ className = '', rounded = 'rounded-lg' }) {
+  return <div className={`skeleton ${rounded} ${className}`} />
+}
+
+export function OverviewSkeleton() {
+  return (
+    <div className="animate-none">
+      <Skeleton className="mb-6 h-9 w-64" />
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[104px]" rounded="rounded-[14px]" />)}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[1fr_330px]">
+        <Skeleton className="h-[340px]" rounded="rounded-[14px]" />
+        <Skeleton className="h-[340px]" rounded="rounded-[14px]" />
+      </div>
+    </div>
+  )
+}
+
+export function SubjectSkeleton() {
+  return (
+    <div>
+      <Skeleton className="mb-5 h-9 w-72" />
+      <Skeleton className="mb-4 h-[168px]" rounded="rounded-[14px]" />
+      <div className="mb-5 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-[112px]" rounded="rounded-[14px]" />)}
+      </div>
+      <div className="flex flex-col gap-2.5">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[86px]" rounded="rounded-[14px]" />)}
+      </div>
+    </div>
+  )
+}

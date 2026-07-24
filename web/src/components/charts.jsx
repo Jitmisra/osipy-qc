@@ -103,6 +103,10 @@ export function QeiStrip({ subjects, cutoff = 0.5 }) {
 export function CheckMatrix({ matrix, subjects }) {
   const tip = useTooltip()
   if (!matrix?.length) return null
+  // Small cohorts get bigger cells so the grid fills its card and reads as a
+  // deliberate figure; large cohorts shrink so everything stays on screen.
+  const n = subjects.length
+  const cell = n <= 6 ? 38 : n <= 12 ? 30 : n <= 24 ? 24 : 18
   return (
     <Card className="p-5">
       <SectionTitle
@@ -126,12 +130,12 @@ export function CheckMatrix({ matrix, subjects }) {
         Every check against every scan. Rows are ordered by how often the check fired.
       </p>
       <div className="overflow-x-auto">
-        <table className="mx-auto border-separate border-spacing-[3px]">
+        <table className="mx-auto border-separate border-spacing-[4px]">
           <thead>
             <tr>
               <th className="sticky left-0 bg-[var(--color-surface)]" />
               {subjects.map((s) => (
-                <th key={s.sid} className="h-[70px] align-bottom">
+                <th key={s.sid} className="h-[74px] align-bottom">
                   <Link
                     to={`/subject/${encodeURIComponent(s.sid)}`}
                     className="block whitespace-nowrap font-mono text-[10px] text-[var(--color-faint)] hover:text-[var(--color-ink)]"
@@ -146,7 +150,7 @@ export function CheckMatrix({ matrix, subjects }) {
           <tbody>
             {matrix.map((row) => (
               <tr key={row.id}>
-                <th className="sticky left-0 whitespace-nowrap bg-[var(--color-surface)] pr-3 text-right text-xs font-semibold">
+                <th className="sticky left-0 whitespace-nowrap bg-[var(--color-surface)] pr-3.5 text-right text-[13px] font-semibold">
                   {row.label}
                 </th>
                 {row.cells.map((c) => {
@@ -156,8 +160,11 @@ export function CheckMatrix({ matrix, subjects }) {
                       <Link
                         to={`/subject/${encodeURIComponent(c.sid)}`}
                         aria-label={`${c.sid}: ${row.label} ${c.verdict || 'not run'}`}
-                        className="flex h-6 w-6 items-center justify-center rounded-[5px] text-[10px] font-bold text-white transition-transform hover:scale-110"
-                        style={{ background: c.verdict ? v.fg : 'var(--color-line)' }}
+                        className="flex items-center justify-center rounded-[6px] font-bold text-white transition-transform hover:z-10 hover:scale-110"
+                        style={{
+                          background: c.verdict ? v.fg : 'var(--color-line)',
+                          width: cell, height: cell, fontSize: Math.max(10, cell * 0.4),
+                        }}
                         onMouseEnter={(e) =>
                           tip.show(e, (
                             <span>
