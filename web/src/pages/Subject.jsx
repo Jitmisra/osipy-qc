@@ -168,48 +168,64 @@ export default function Subject({ cohort }) {
         )}
       </Card>
 
-      {/* Headline measurements. Every tile shows the value AND where it sits in
-          the range it was graded against - a bare number says nothing about
-          whether it is fine or catastrophic. */}
+      {/* One ruled panel, not five cards. A fixed five-column grid left blank
+          cells whenever a check did not produce its metric, and five competing
+          numerals in five card frames shouted at each other. Rows also let each
+          measurement sit beside the range it was graded on. */}
       {data.kpis.length > 0 && (
-        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {data.kpis.map((k) => {
-            const kv = verdictOf(k.verdict)
-            const text = k.format === '0.000' ? k.value.toFixed(3)
-              : k.format === '0.00' ? k.value.toFixed(2)
-              : k.format === '0.0' ? k.value.toFixed(1)
-              : Math.round(k.value).toLocaleString()
-            return (
-              <Card key={k.key} className="flex flex-col p-4 shadow-[var(--shadow-e1)]">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
-                    {k.label}
-                  </span>
-                  <span
-                    aria-label={k.verdict}
-                    title={k.verdict}
-                    className="mt-0.5 inline-block h-1.5 w-1.5 flex-none rounded-full"
-                    style={{ background: kv.fg }}
-                  />
-                </div>
-                <div className="mt-1.5 flex items-baseline gap-1">
-                  <span className="num truncate text-[25px] font-bold leading-none" style={{ color: kv.fg }}>
-                    {text}
-                  </span>
-                  {k.unit && <span className="text-[11px] text-[var(--color-muted)]">{k.unit}</span>}
-                </div>
-                <BandMeter value={k.value} band={k.band} axis={k.axis} color={kv.fg} />
-                <div className="mt-2 text-[11px] leading-snug text-[var(--color-faint)]">{k.foot}</div>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-      {data.kpis.length > 0 && (
-        <p className="-mt-4 mb-6 text-[11.5px] text-[var(--color-faint)]">
-          The shaded stretch on each meter is the expected range; the marker is this scan.
-          An arrow means the value runs past the end of the scale.
-        </p>
+        <Card className="mb-6 overflow-hidden p-0 shadow-[var(--shadow-e1)]">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3">
+            <h2 className="text-[13px] font-semibold uppercase tracking-[0.09em] text-[var(--color-faint)]">
+              Measured against expectation
+            </h2>
+            <Link
+              to="/methodology"
+              className="font-mono text-[11px] text-[var(--color-accent-600)] hover:underline"
+            >
+              where these ranges come from →
+            </Link>
+          </div>
+          <ul>
+            {data.kpis.map((k) => {
+              const kv = verdictOf(k.verdict)
+              const text = k.format === '0.000' ? k.value.toFixed(3)
+                : k.format === '0.00' ? k.value.toFixed(2)
+                : k.format === '0.0' ? k.value.toFixed(1)
+                : Math.round(k.value).toLocaleString()
+              return (
+                <li
+                  key={k.key}
+                  className="grid items-center gap-4 border-b border-[var(--color-line)] px-5 py-2.5 last:border-0 md:grid-cols-[150px_112px_minmax(160px,1fr)_minmax(0,210px)]"
+                >
+                  <a href={`#chk-${k.check.replace(/\./g, '-')}`} className="group min-w-0">
+                    <span className="block truncate text-[12.5px] font-semibold group-hover:text-[var(--color-accent-600)]">
+                      {k.label}
+                    </span>
+                    <span className="block truncate font-mono text-[10px] text-[var(--color-faint)]">
+                      {k.check}
+                    </span>
+                  </a>
+                  <div className="flex items-baseline gap-1 md:justify-end">
+                    <span className="num text-[19px] font-semibold leading-none" style={{ color: kv.fg }}>
+                      {text}
+                    </span>
+                    {k.unit && <span className="text-[10.5px] text-[var(--color-muted)]">{k.unit}</span>}
+                  </div>
+                  <BandMeter value={k.value} band={k.band} axis={k.axis} color={kv.fg} className="!mt-0" />
+                  <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-faint)]">
+                    <span
+                      aria-label={k.verdict}
+                      title={k.verdict}
+                      className="inline-block h-2 w-2 flex-none rounded-full"
+                      style={{ background: kv.fg }}
+                    />
+                    <span className="truncate">{k.foot}</span>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
       )}
 
       {/* findings before images: the checks are the diagnosis, the pictures are evidence */}

@@ -100,7 +100,7 @@ export function QeiStrip({ subjects, cutoff = 0.5 }) {
  * Checks × subjects. A whole row lit up means a systemic problem with the
  * protocol rather than with one scan — which the per-scan views cannot show.
  */
-export function CheckMatrix({ matrix, subjects }) {
+export function CheckMatrix({ matrix, subjects, total }) {
   const tip = useTooltip()
   if (!matrix?.length) return null
   // Small cohorts get bigger cells so the grid fills its card and reads as a
@@ -127,7 +127,8 @@ export function CheckMatrix({ matrix, subjects }) {
         Check matrix
       </SectionTitle>
       <p className="-mt-1 mb-3 text-xs text-[var(--color-muted)]">
-        Every check against every scan. Rows are ordered by how often the check fired.
+        Every check against every scan, ordered by how often it fired. The bar after each
+        name is how many scans that check flagged.
       </p>
       <div className="overflow-x-auto">
         <table className="mx-auto border-separate border-spacing-[4px]">
@@ -150,8 +151,19 @@ export function CheckMatrix({ matrix, subjects }) {
           <tbody>
             {matrix.map((row) => (
               <tr key={row.id}>
-                <th className="sticky left-0 whitespace-nowrap bg-[var(--color-surface)] pr-3.5 text-right text-[13px] font-semibold">
-                  {row.label}
+                <th className="sticky left-0 whitespace-nowrap bg-[var(--color-surface)] pr-3.5 text-right font-normal">
+                  <span className="inline-flex items-center gap-2.5">
+                    <span className="text-[13px] font-semibold">{row.label}</span>
+                    <span
+                      title={`flagged ${row.flagged} of ${total ?? subjects.length}`}
+                      className="relative hidden h-1.5 w-10 overflow-hidden rounded-full bg-[var(--color-well)] sm:inline-block"
+                    >
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-none)]"
+                        style={{ width: `${(row.flagged / Math.max(total ?? subjects.length, 1)) * 100}%` }}
+                      />
+                    </span>
+                  </span>
                 </th>
                 {row.cells.map((c) => {
                   const v = verdictOf(c.verdict)
