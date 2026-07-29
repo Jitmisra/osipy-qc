@@ -170,3 +170,40 @@ def test_a_zero_cbf_map_with_valid_masks_is_unknown_not_scored():
     c = synthetic_case(quality="clean", seed=0)
     r = qei_check(cbf=np.zeros_like(c.cbf), gm=c.gm, wm=c.wm, csf=c.csf)
     assert r.verdict is Verdict.UNKNOWN
+
+
+def test_the_five_millimetre_smoothing_is_actually_applied():
+    """QEI's constants were fitted on 5 mm FWHM smoothed CBF, so the smoothing is
+    part of the metric rather than a tidy-up before it.
+
+    This pins it. Removing the smooth_fwhm call, or ignoring the configured
+    width, previously left all 165 tests green — the step could have been
+    deleted in a refactor and nothing would have said so.
+    """
+    from osipy_qc.checks.qei import compute_qei
+    from osipy_qc.core.config import QCConfig
+
+    rng = np.random.default_rng(0)
+    shape = (28, 28, 22)
+    gm = np.zeros(shape); gm[6:22, 6:22, 5:17] = 0.95
+    wm = np.zeros(shape); wm[10:18, 10:18, 8:14] = 0.95
+    csf = np.clip(1.0 - gm - wm, 0.0, 1.0)
+    # high-frequency noise is exactly what a 5 mm kernel removes
+    cbf = 60.0 * gm + 22.0 * wm + rng.normal(0, 18.0, shape)
+
+    inputs = dict(cbf=cbf, gm=gm, wm=wm, csf=csf, voxel_mm=(3.0, 3.0, 3.0))
+
+    none = compute_qei(**inputs, cfg=QCConfig(smooth_fwhm_mm=0.0))["qei"]
+    five = compute_qei(**inputs, cfg=QCConfig(smooth_fwhm_mm=5.0))["qei"]
+    wide = compute_qei(**inputs, cfg=QCConfig(smooth_fwhm_mm=12.0))["qei"]
+
+    # smoothing raises the structural correlation, so the score moves with it
+    assert none != five, "the configured smoothing width had no effect"
+    assert five != wide, "changing the smoothing width had no effect"
+    assert five > none, "5 mm smoothing should improve agreement with the template"
+
+    # and the width is physical: the same request on bigger voxels is a smaller
+    # kernel in voxels, so it cannot produce the same number
+    coarse = compute_qei(**{**inputs, "voxel_mm": (6.0, 6.0, 6.0)},
+                         cfg=QCConfig(smooth_fwhm_mm=5.0))["qei"]
+    assert coarse != five, "voxel size was ignored when converting mm to voxels"
