@@ -313,6 +313,20 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         return payload
 
 
+def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> str:
+    """The same grading, rendered as the self-contained HTML report.
+
+    Used by the no-build console and by any client that did not ask for JSON.
+    Both paths call _grade_upload first, so the grading cannot differ between
+    them — only the presentation does.
+    """
+    from .report_html import render_html
+    _grade_upload(fields)                       # grades and remembers the subject
+    subject = next(reversed(_UPLOADS.values()))
+    return render_html(subject.report, inputs=subject.inputs, cfg=subject.cfg,
+                       title=f"ASL QC report — {subject.sid}")
+
+
 def _safe_back(raw: str) -> str:
     """Sanitise a user-supplied redirect target. Only a local, single-slash-rooted
     path is allowed — never an absolute URL (open redirect) and never one carrying
@@ -551,7 +565,7 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             # React owns the UI. There is no second, server-rendered copy of it
             # to drift out of step; the only page rendered here is the upload
             # console, which must work before any build exists.
-            if self._serve_spa(path):
+            if getattr(self.server, "spa", True) and self._serve_spa(path):
                 return
 
             if path in ("/", "/index.html", "/upload"):
@@ -609,10 +623,17 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 )
             body = self.rfile.read(length)
             fields = _parse_multipart(body, self.headers.get("Content-Type", ""))
-            self._send_json(_grade_upload(fields))
+            wants_json = "application/json" in (self.headers.get("Accept") or "")
+            if wants_json:
+                self._send_json(_grade_upload(fields))
+            else:
+                self._send(_grade_upload_html(fields))
         except Exception as exc:                # a bad upload must not kill the server
             traceback.print_exc()
-            self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            if "application/json" in (self.headers.get("Accept") or ""):
+                self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            else:
+                self._send(_upload_page(error=f"{type(exc).__name__}: {exc}"), 400)
 
 
 def _spa_root() -> str | None:
@@ -641,6 +662,7 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     batch = None                # set to a dict{subjects,summary,cfg,dataset} for the dashboard
+    spa = True                  # False in --serve mode: the HTML console owns the root
 
 
 def _run(httpd, url: str, banner: str, open_browser: bool) -> None:
@@ -658,8 +680,14 @@ def _run(httpd, url: str, banner: str, open_browser: bool) -> None:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True) -> None:
-    """Run the single-scan upload console. Binds to localhost (see module docstring)."""
+    """Run the single-scan upload console, which answers with the HTML report.
+
+    The built React app is deliberately not served here: this mode exists to be
+    the thing that works with no build step, and letting the SPA claim the root
+    would make the mode indistinguishable from --dashboard.
+    """
     with _Server((host, port), QCHandler) as httpd:
+        httpd.spa = False
         _run(httpd, f"http://{host}:{port}/", "osipy-qc upload console running at", open_browser)
 
 

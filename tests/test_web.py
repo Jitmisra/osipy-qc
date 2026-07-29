@@ -11,6 +11,7 @@ import gzip
 import threading
 import time
 import urllib.error
+import os
 import urllib.parse
 import urllib.request
 
@@ -166,7 +167,8 @@ def test_upload_with_no_file_shows_an_error_and_keeps_serving():
     try:
         req = urllib.request.Request(
             base + "/run", data=b"--B--\r\n",
-            headers={"Content-Type": "multipart/form-data; boundary=B"})
+            headers={"Content-Type": "multipart/form-data; boundary=B",
+                     "Accept": "application/json"})
         try:
             urllib.request.urlopen(req)
         except urllib.error.HTTPError as e:
@@ -205,7 +207,8 @@ def test_end_to_end_upload_produces_a_report(tmp_path):
     try:
         req = urllib.request.Request(
             base + "/run", data=body,
-            headers={"Content-Type": "multipart/form-data; boundary=B"})
+            headers={"Content-Type": "multipart/form-data; boundary=B",
+                     "Accept": "application/json"})
         import json as _json
         res = urllib.request.urlopen(req)
         assert res.headers.get("Content-Type", "").startswith("application/json")
@@ -227,3 +230,43 @@ def test_end_to_end_upload_produces_a_report(tmp_path):
 
 def test_upload_limit_is_declared():
     assert MAX_UPLOAD_BYTES > 0
+
+
+def test_run_serves_html_when_json_was_not_requested():
+    """The no-build console cannot render a payload, so it gets the report.
+
+    /run answers whichever the caller asked for: React sends
+    Accept: application/json and renders the payload itself; anything else —
+    the console's own form, or a plain POST with JavaScript off — gets the
+    self-contained HTML report it can actually display.
+    """
+    import nibabel as nib
+
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="clean", seed=0)
+    aff = np.diag([3.0, 3.0, 3.0, 1.0])
+    import tempfile
+    tmp = tempfile.mkdtemp()
+
+    def blob(arr):
+        p = os.path.join(tmp, "x.nii.gz")
+        nib.save(nib.Nifti1Image(arr.astype(np.float32), aff), p)
+        with open(p, "rb") as fh:
+            return fh.read()
+
+    body = (_part("cbf", "cbf.nii.gz", blob(c.cbf))
+            + _part("gm", "gm.nii.gz", blob(c.gm))
+            + b"--B--\r\n")
+    srv, base = _serve()
+    try:
+        req = urllib.request.Request(
+            base + "/run", data=body,
+            headers={"Content-Type": "multipart/form-data; boundary=B"})
+        res = urllib.request.urlopen(req)
+        assert res.headers.get("Content-Type", "").startswith("text/html")
+        html = res.read().decode()
+        assert html.startswith("<!DOCTYPE html>")
+        assert "1.qei" in html
+    finally:
+        srv.shutdown()

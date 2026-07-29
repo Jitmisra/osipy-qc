@@ -47,7 +47,11 @@ export const figureUrl = (sid, name) =>
 /** Upload one scan for grading; resolves to the report HTML. */
 /** Grade an uploaded scan. Returns the same payload shape as fetchSubject. */
 export async function uploadScan(formData) {
-  const res = await fetch('/run', { method: 'POST', body: formData })
+  const res = await fetch('/run', {
+    method: 'POST',
+    body: formData,
+    headers: { Accept: 'application/json' },   // the console gets HTML; we want the payload
+  })
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new Error(data?.error || 'The server could not grade that upload.')
   return data

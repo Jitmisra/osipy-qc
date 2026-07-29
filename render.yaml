@@ -24,7 +24,10 @@ services:
       npm --prefix web run build
       pip install --upgrade pip
       pip install .
-    # The synthetic demo cohort, deliberately — NOT --dashboard output.
+    # The upload console, which answers with the self-contained HTML report —
+    # this is what the site is for: drop in a CBF map, get a report back.
+    #
+    # NOT --dashboard output.
     #
     # Two reasons. A clean checkout contains only output/.gitkeep, so grading that
     # folder finds no subjects and the process exits non-zero, which would
@@ -33,8 +36,8 @@ services:
     #
     # 0.0.0.0 is required: the server binds loopback by default, so Render would
     # see a service that never accepts a connection. $PORT is assigned by Render.
-    startCommand: osipy-qc --dashboard-demo --no-browser --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/cohort
+    startCommand: osipy-qc --serve --no-browser --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
     autoDeployTrigger: commit
     envVars:
       - key: PYTHON_VERSION
