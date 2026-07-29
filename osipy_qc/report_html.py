@@ -50,9 +50,11 @@ _REPORT_CSS = """
 .wrap{max-width:1080px;margin:0 auto;padding:0 1.5rem}
 
 /* hero */
-.hero{border-radius:18px;padding:1.6rem 1.7rem;margin:.4rem 0 1.4rem;position:relative;
+.hero{border-radius:var(--radius-pane);padding:1.6rem 1.7rem;margin:.4rem 0 1.4rem;position:relative;
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden;
   overflow:hidden;border:1px solid var(--line)}
 .hero .eyebrow{opacity:.9}
+.hero::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--hero-fg,var(--accent))}
 .hero h1{font-size:clamp(1.8rem,4vw,2.5rem);margin:.35rem 0 .3rem;font-weight:700}
 .hero p{margin:0;font-size:1rem;max-width:60ch}
 .hero .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
@@ -86,7 +88,7 @@ figcaption{font-size:.78rem;color:var(--muted);padding:.6rem .8rem;border-top:1p
 .drivers .dchip .dot{width:7px;height:7px;border-radius:50%;flex:none}
 
 /* check cards */
-.checks{display:flex;flex-direction:column;gap:.7rem}
+.checks{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
 .check{display:grid;grid-template-columns:5px 1fr;overflow:hidden;scroll-margin-top:80px}
 .check .rail{width:5px}
 .check .body{padding:.95rem 1.1rem}
@@ -155,9 +157,11 @@ def _hero(d: dict, cfg: QCConfig) -> str:
                      f'{n} {esc(v)}</span>')
     gloss = _OVERALL_GLOSS.get(overall, "")
     drivers = _driver_chips(d)
-    # A subtle wash of the verdict tint, kept light so text stays readable.
+    # The surface stays neutral and a spine down the edge carries the status.
+    # A whole panel flooded with verdict colour competes with the accent the rest
+    # of the product is built from, and shouts a fact stated three lines later.
     return (
-        f'<div class="hero" style="background:linear-gradient(180deg,{bg},var(--surface))">'
+        f'<div class="hero" style="--hero-fg:{fg}">'
         f'<div class="eyebrow" style="color:{fg}">OVERALL VERDICT</div>'
         f'<h1 style="color:{fg}">{esc(overall)}</h1>'
         f'<p>{esc(gloss)}</p>'

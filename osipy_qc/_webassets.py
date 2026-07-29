@@ -17,13 +17,15 @@ Design direction — matched to the OSIPI QC-ToolBox proposal:
 from __future__ import annotations
 
 # Verdict -> (text colour, tint background). From the proposal palette.
+# (ink, tint) per verdict — the same pairs the React app uses, so a printed
+# report and the screen it came from are unmistakably one product.
 VERDICT_COLOURS: dict[str, tuple[str, str]] = {
-    "PASS": ("#2A8A73", "#E0F2EF"),
-    "WARN": ("#B26A0B", "#FBEFD5"),
-    "FAIL": ("#A43122", "#FBDFDB"),
-    "UNKNOWN": ("#7E8790", "#ECECEA"),
-    "N/A": ("#7E8790", "#ECECEA"),
-    "INFO": ("#3B6FA8", "#E7EEF6"),
+    "PASS": ("#1c6b4a", "#dff0e7"),
+    "WARN": ("#7a5a08", "#f6ecd3"),
+    "FAIL": ("#8f0f26", "#fadfe3"),
+    "UNKNOWN": ("#63605a", "#eae8e2"),
+    "N/A": ("#63605a", "#eae8e2"),
+    "INFO": ("#1f5b96", "#e3ecf6"),
 }
 
 # The OSIPI mark — a pink->purple infinity loop, as on the proposal. Rendered
@@ -51,22 +53,28 @@ def brand(sub: str = "QC-ToolBox v1.0") -> str:
 
 BASE_CSS = """
 :root{
-  --paper:#FAF8F5; --well:#F1ECE5; --surface:#FFFFFF;
-  --ink:#1C1B1A; --muted:#6E6864; --faint:#9A938C; --line:#E5E0DA;
-  --accent:#AC4D2A; --accent-600:#8E3D1F; --accent-050:#FBEEE6;
-  --pass:#2A8A73; --warn:#B26A0B; --fail:#A43122; --info:#3B6FA8;
-  --radius:14px; --radius-sm:10px;
-  --shadow:0 1px 2px rgba(28,27,26,.04), 0 10px 26px -14px rgba(28,27,26,.16);
-  --shadow-lg:0 2px 8px rgba(28,27,26,.06), 0 28px 56px -22px rgba(28,27,26,.24);
-  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  /* One palette across the product. These are the values in
+     web/src/index.css; the standalone report is the same thing as the app,
+     printed, so it must not have a second look of its own. */
+  --paper:#f6f7f9; --well:#f1f3f6; --surface:#ffffff;
+  --ink:#1f1d1a; --muted:#57534a; --faint:#6b665c; --line:#e4e7ec;
+  --accent:#c15f3c; --accent-600:#a34726; --accent-050:#fbeee8;
+  --accent-fill:#bb5b38;
+  --pass:#1c6b4a; --warn:#7a5a08; --fail:#8f0f26; --info:#1f5b96;
+  --pass-mark:#1f7a54; --warn-mark:#96700c; --fail-mark:#a8142e; --info-mark:#256aad;
+  --radius:20px; --radius-sm:12px; --radius-pane:26px;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 4px 8px -4px rgba(16,24,40,.05),
+           0 16px 32px -12px rgba(16,24,40,.08);
+  --shadow-lg:0 2px 4px rgba(16,24,40,.06), 0 18px 44px -20px rgba(16,24,40,.24);
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);font-family:var(--sans);
-  line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:-.005em}
+  line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:0}
 ::selection{background:var(--accent-050)}
-a{color:var(--accent-600);text-decoration:none}
+a{color:var(--accent-fill);text-decoration:none}
 a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mono{font-family:var(--mono)}
