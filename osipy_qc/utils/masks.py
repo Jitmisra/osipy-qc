@@ -70,3 +70,20 @@ def brain_mask_fallback(cbf: np.ndarray, percentile: float = 50.0) -> np.ndarray
     if nz.size == 0:
         return np.zeros(mag.shape, dtype=bool)
     return mag > np.percentile(nz, percentile)
+
+
+def check_prob_range(prob, name: str = "tissue map") -> tuple[bool, float]:
+    """Is this actually a probability map, or a 0-255 one wearing the name?
+
+    SPM, ANTs and DICOM-converted segmentations are commonly written 0-255 or
+    0-100. Every mask in this package thresholds with `prob > 0.7`, which on a
+    0-255 map selects every voxel holding more than 0.3% tissue — so grey
+    matter, white matter and CSF all become the whole brain and the score is
+    quietly wrong rather than obviously broken.
+
+    Returns (looks_like_probability, observed_max).
+    """
+    arr = np.asarray(prob, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    pmax = float(finite.max()) if finite.size else 0.0
+    return pmax <= 1.001, pmax

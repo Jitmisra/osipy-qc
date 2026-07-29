@@ -75,6 +75,20 @@ def motion_check(motion_params=None, asl_4d=None, brain=None,
 
     if motion_params is not None:
         fwd = framewise_displacement(motion_params, cfg.head_radius_mm)
+        # A NaN row poisons the two differences either side of it, and those
+        # frame pairs are genuinely unmeasurable — not zero motion. Filling them
+        # with 0.0 would fabricate stillness, and leaving them in made every
+        # comparison False, so a scan with a NaN row graded PASS on "mean FWD
+        # nan mm". BIDS writes n/a and MCFLIRT can emit NaN, so this is ordinary
+        # input, and grading it PASS is the exact failure a QC tool exists to
+        # prevent.
+        n_bad = int(np.count_nonzero(~np.isfinite(fwd))) if fwd.size else 0
+        fwd = fwd[np.isfinite(fwd)] if fwd.size else fwd
+        if n_bad and not fwd.size:
+            return CheckResult(
+                "7.1.motion", Verdict.UNKNOWN, metric={"n_nonfinite_frame_pairs": n_bad},
+                reason="motion parameters are entirely non-finite (NaN/Inf) - "
+                       "motion cannot be graded")
         if fwd.size:
             mean_fwd, max_fwd = float(fwd.mean()), float(fwd.max())
             # Frames a per-frame censoring rule would drop (Power 2012's 0.5 mm).
@@ -88,6 +102,8 @@ def motion_check(motion_params=None, asl_4d=None, brain=None,
                 "censored_fraction": round(censor_frac, 4),
                 "censor_threshold_mm": cfg.fd_frame_censor_mm,
             })
+            if n_bad:
+                metric["n_nonfinite_frame_pairs"] = n_bad
             # Each threshold is now applied to the statistic its source defines:
             #   mean FWD > 1.0 mm  -> Adebimpe 2022's subject-exclusion rule (published).
             #   per-frame > 0.5 mm -> Power 2012's censoring rule (published) - counted,
@@ -100,12 +116,19 @@ def motion_check(motion_params=None, asl_4d=None, brain=None,
                 verdict = Verdict.WARN
                 reason = (f"mean FWD {mean_fwd:.3f} mm, but {censor_frac*100:.0f}% of frames "
                           f"exceed the {cfg.fd_frame_censor_mm} mm censoring line")
+            elif n_bad:
+                # measurable frames look fine, but some could not be measured at
+                # all, so the scan cannot be called clean
+                verdict = Verdict.WARN
+                reason = (f"mean FWD {mean_fwd:.3f} mm over the measurable frames, but "
+                          f"{n_bad} frame pair(s) are non-finite (failed or NaN volumes)")
             else:
                 verdict = Verdict.PASS
                 reason = f"mean FWD {mean_fwd:.3f} mm ({n_censor}/{fwd.size} frames over censor line)"
 
     if asl_4d is not None:
         dv = dvars(asl_4d, brain)
+        dv = dv[np.isfinite(dv)] if dv.size else dv
         if dv.size:
             metric["mean_dvars"] = round(float(dv.mean()), 4)
             if verdict == Verdict.UNKNOWN:   # no motion params -> report DVARS, no hard verdict

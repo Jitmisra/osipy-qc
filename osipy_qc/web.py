@@ -31,6 +31,7 @@ for.
 from __future__ import annotations
 
 import http.server
+import math
 import os
 import re
 import socketserver
@@ -43,7 +44,12 @@ from .core.config import POPULATIONS, for_population
 from .report import run_qc
 
 # Refuse absurd uploads outright rather than trying to parse them.
-MAX_UPLOAD_BYTES = 512 * 1024 * 1024      # 512 MB across all files in one request
+# The free Render container has 512 MB of RAM in total, and a request is copied
+# more than once on its way through: read into memory, then split by the
+# multipart boundary. A 512 MB ceiling therefore guaranteed an out-of-memory kill
+# from a single request that was inside the advertised limit. Real inputs are
+# 8-16 MB a file, so 64 MB is generous; the env var lets a bigger host raise it.
+MAX_UPLOAD_BYTES = int(os.environ.get("OSIPY_MAX_UPLOAD_MB", "64")) * 1024 * 1024
 
 # youngest -> oldest, for the segmented population control, with short display
 # labels so nothing clips in the chips (the group heading already says "Population")
@@ -425,9 +431,15 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         if not hasattr(cfg, name):
             continue
         try:
-            setattr(cfg, name, float(raw))
+            val = float(raw)
         except ValueError:
             continue
+        # "nan" and "inf" parse happily, and then every `x >= cutoff` is False,
+        # so a clean scan falls through to FAIL against a cut-off of nan. The
+        # documented contract is that a field which is not a number is ignored.
+        if not math.isfinite(val):
+            continue
+        setattr(cfg, name, val)
     if "strict" in fields or "thr_qei_pass" in fields:
         # only a form that actually carries the control may change it; an upload
         # that says nothing about strictness keeps the packaged default rather
@@ -461,7 +473,18 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         # simply be renamed to the form field. They are sanitised instead: the
         # basename is stripped of any path and reduced to safe characters, which
         # keeps the role legible without trusting the client.
-        raw_dir = os.path.join(tmp, "raw")
+        # Name the folder after the client's own, when a folder upload told us
+        # what it was. detect_dataset reads it for the vendor and for whether
+        # background suppression was on, and BS decides whether the control/label
+        # swap check applies at all — so losing the name changed the verdict.
+        client_dir = ""
+        for fname, _data in list(fields.get("files_multi", [])):
+            head = os.path.dirname(fname.replace("\\", "/")).strip("/")
+            if head:
+                client_dir = head.split("/")[0]
+                break
+        safe_dir = re.sub(r"[^A-Za-z0-9._-]", "_", client_dir)[:60] or "raw"
+        raw_dir = os.path.join(tmp, safe_dir)
         saved_raw = os.path.isdir(raw_dir)
         raw_parts = list(fields.get("files_multi", []))
         for field, value in fields.items():          # the per-role fields still work
@@ -482,7 +505,21 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             # the CBF-derived inputs win where the two overlap; the raw folder
             # only adds what it alone can know
             inputs = {**load_folder(raw_dir), **inputs}
-        report = run_qc(inputs, cfg=cfg)
+        # Grade only what was actually supplied. Running the whole registry on a
+        # CBF map alone leaves ten Stream-A checks with nothing to look at; each
+        # returns UNKNOWN, and the overall verdict is dragged to WARN — so a
+        # flawless map could never PASS through this console. Verified: the clean
+        # synthetic case is WARN with every check and PASS with the CBF set.
+        from .batch import cbf_map_checks
+        if saved_raw:
+            from .core.registry import all_checks
+            # 4.1 needs an ASL mask and a structural mask, and no loader in the
+            # package produces either, so including it pins even a full raw
+            # upload at WARN.
+            checks = [n for n in all_checks() if n != "4.1.coregistration"]
+        else:
+            checks = cbf_map_checks()
+        report = run_qc(inputs, cfg=cfg, checks=checks)
 
         from .api import subject_payload
         from .batch import Subject

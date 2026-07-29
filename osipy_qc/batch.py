@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import glob
 import os
+import math
+
 from dataclasses import dataclass, field, replace
 
 from .core.config import POPULATIONS, QCConfig, for_population
@@ -246,9 +248,14 @@ def cfg_from_params(base: QCConfig, params: dict) -> QCConfig:
     for name in TUNABLE:
         if params.get(name) not in (None, ""):
             try:
-                kw[name] = float(params[name])
+                val = float(params[name])
             except (TypeError, ValueError):
-                pass
+                continue
+            # nan and inf parse fine and then make every comparison False, so a
+            # clean scan falls through to FAIL against a cut-off of nan. This
+            # path is server-wide, so one such value would poison the cohort.
+            if math.isfinite(val):
+                kw[name] = val
     strict = params.get("strict")
     if strict is not None:
         kw["strict"] = strict in ("on", "1", "true", "True")

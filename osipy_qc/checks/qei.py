@@ -27,6 +27,7 @@ from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
 from ..utils.mathops import geometric_mean, pearson, pooled_within_tissue_variance
 from ..utils.masks import clean_nonfinite, threshold_prob
+from ..utils.masks import check_prob_range
 from ..utils.smoothing import smooth_fwhm
 
 
@@ -37,6 +38,16 @@ def compute_qei(cbf, gm, wm, csf, cfg: QCConfig = QCConfig(),
     gm = np.asarray(gm, dtype=float)
     wm = np.asarray(wm, dtype=float)
     csf = np.asarray(csf, dtype=float)
+
+    # A defence for callers who hand arrays straight in rather than going
+    # through io.load_cbf_inputs. Thresholding a 0-255 segmentation at 0.7 makes
+    # every tissue mask the whole brain, and the score comes out plausible and
+    # wrong — which is worse than an error.
+    for name, arr in (("gm", gm), ("wm", wm), ("csf", csf)):
+        ok, pmax = check_prob_range(arr, name)
+        if not ok:
+            return {"qei": None, "degenerate": True, "bad_prob_range": name,
+                    "observed_max": round(pmax, 3)}
 
     if smooth:
         cbf = smooth_fwhm(cbf, cfg.smooth_fwhm_mm, voxel_mm)
@@ -106,12 +117,21 @@ def qei_check(cbf=None, gm=None, wm=None, csf=None, cfg: QCConfig = QCConfig(),
         return CheckResult("1.qei", Verdict.UNKNOWN,
                            reason="needs CBF map + GM/WM/CSF tissue maps in ASL space")
     m = compute_qei(cbf, gm, wm, csf, cfg, voxel_mm)
+    if m.get("bad_prob_range"):
+        bad, pmax = m["bad_prob_range"], m["observed_max"]
+        scale = 255 if pmax > 100 else 100
+        return CheckResult(
+            "1.qei", Verdict.UNKNOWN, metric=m,
+            reason=(f"{bad} is not a probability map (max {pmax:g}) - it looks like a "
+                    f"0-{scale} segmentation. Divide by {scale}: left as it is, every "
+                    "tissue mask covers the whole brain and the score is wrong"))
     if m.get("degenerate"):
         return CheckResult(
             "1.qei", Verdict.UNKNOWN, metric=m,
-            reason=(f"cannot score: {m['n_gm']} GM, {m['n_wm']} WM, {m['n_csf']} CSF "
-                    f"voxels above probability {cfg.tissue_thresh:g} - the tissue maps "
-                    "may be misaligned, empty, or on a different scale"))
+            reason=(f"cannot score: {m.get('n_gm', 0)} GM, {m.get('n_wm', 0)} WM, "
+                    f"{m.get('n_csf', 0)} CSF voxels above probability "
+                    f"{cfg.tissue_thresh:g} - the tissue maps may be misaligned, "
+                    "empty, or on a different scale"))
     q = m["qei"]
     if q >= cfg.qei_pass:
         v, why = Verdict.PASS, f"QEI {q} (>= {cfg.qei_pass})"

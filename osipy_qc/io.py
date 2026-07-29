@@ -14,6 +14,7 @@ import nibabel as nib
 import numpy as np
 
 from .checks.schema import classify_role, detect_dataset
+from .utils.masks import check_prob_range
 
 
 # A NIfTI header declares its shape, and gzip hides how big that will be. A 6 MB
@@ -121,6 +122,20 @@ def load_cbf_inputs(cbf: str, gm: str | None = None, wm: str | None = None,
             raise ValueError(
                 f"{key} shape {inputs[key].shape} != cbf shape {inputs['cbf'].shape} — "
                 "resample the tissue maps into ASL space first")
+
+    # Checked before the CSF derivation, which is also wrong for out-of-range
+    # input: 1 - GM - WM on 0-255 maps clips to zero everywhere.
+    for key in ("gm", "wm", "csf"):
+        if key not in inputs:
+            continue
+        ok, pmax = check_prob_range(inputs[key], key)
+        if not ok:
+            scale = 255 if pmax > 100 else 100
+            raise ValueError(
+                f"{key} is not a probability map: its maximum is {pmax:g}, not <= 1. "
+                f"It looks like a 0-{scale} segmentation — divide by {scale} before "
+                "grading. Left as it is, every tissue mask would cover the whole "
+                "brain and the score would be quietly wrong.")
 
     if csf is None and "gm" in inputs and "wm" in inputs:
         # 1 - GM - WM is only CSF *inside the head*. Outside it GM and WM are both
