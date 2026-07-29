@@ -6,20 +6,24 @@
 
 @theme {
   /* ---- surfaces (light) ------------------------------------------------ */
-  --color-paper:      #f4f6fb;  /* ground base + row-hover + field fill      */
-  --color-surface:    #ffffff;  /* .panel — every opaque data surface        */
-  --color-well:       #eef1f8;  /* .raised — nested blocks, theads, drawers  */
-  --color-track:      #e4e9f3;  /* .well  — meter tracks, inputs (NEW)       */
-  --color-line:       #e2e6ef;
-  --color-line-strong:#ccd3e0;  /* NEW: hover borders, sort arrows           */
-  --color-ink:        #101319;
-  --color-muted:      #5a6172;
-  --color-faint:      #646b7d;
+  --color-paper: #f4f3ee;  /* ground base + row-hover + field fill      */
+  --color-surface: #ffffff;  /* .panel — every opaque data surface        */
+  --color-well: #edebe4;  /* .raised — nested blocks, theads, drawers  */
+  --color-track: #e3e0d7;  /* .well  — meter tracks, inputs (NEW)       */
+  --color-line: #ddd9cf;
+  --color-line-strong: #b1ada1;  /* NEW: hover borders, sort arrows           */
+  --color-ink: #1f1d1a;
+  --color-muted: #57534a;
+  --color-faint: #6b665c;
 
-  /* ---- accent: ONE flat violet. No gradient anywhere in the UI. -------- */
-  --color-accent:     #6d34d6;  /* fill + link + focus ring                  */
-  --color-accent-600: #5a25bd;  /* pressed / hover fill                      */
-  --color-accent-050: #f0eafd;  /* selected nav row, footnote panel          */
+  /* ---- accent: the brand terracotta. No gradient anywhere in the UI. ---
+     #c15f3c is the MARK tier (rails, borders, icon strokes, focus rings).
+     Text and white-on-fill use --color-accent-fill, a hair darker at deltaE
+     1.8 — visually the same colour, but it clears 4.5:1 where #c15f3c is
+     4.23:1. Nothing else changes. */
+  --color-accent: #c15f3c;  /* fill + link + focus ring                  */
+  --color-accent-600: #a34726;  /* pressed / hover fill                      */
+  --color-accent-050: #fbeee8;  /* selected nav row, footnote panel          */
   --color-on-accent:  #ffffff;
   --color-on-status:  #ffffff;  /* glyph colour inside a filled status dot   */
 
@@ -51,11 +55,12 @@
   --shadow-e1: 0 1px 1px rgba(20,26,48,.04), 0 8px 24px -12px rgba(20,26,48,.16);
   --shadow-e2: 0 2px 4px rgba(20,26,48,.05), 0 18px 44px -20px rgba(20,26,48,.24);
   --shadow-e3: 0 8px 16px rgba(20,26,48,.10), 0 40px 90px -30px rgba(20,26,48,.42);
+  --color-accent-fill: #bb5b38;
 }
 
 /* Non-utility scalars live outside @theme: they are read by hand-written CSS. */
 :root {
-  --ground-1:    #e9ecfa;                       /* the single aurora radial  */
+  --ground-1:    #f7efe9;                       /* the single aurora radial  */
   --edge-top:    inset 0 1px 0 rgba(255,255,255,.92);  /* specular top edge  */
   --edge-ring:   inset 0 0 0 1px rgba(16,19,26,.045);
   --blur-chrome: 30px;  --sat-chrome: 180%;
@@ -69,20 +74,20 @@
    DARK — a designed second theme, not an inversion.
    ========================================================================= */
 :root[data-theme="dark"] {
-  --color-paper:      #0b0d14;
-  --color-surface:    #171a22;
-  --color-well:       #212634;
-  --color-track:      #10131b;
-  --color-line:       #2b3140;
-  --color-line-strong:#3a4256;
-  --color-ink:        #eef1f7;
-  --color-muted:      #9aa3b4;
-  --color-faint:      #8e97aa;
+  --color-paper: #141310;
+  --color-surface: #1e1c19;
+  --color-well: #282621;
+  --color-track: #171512;
+  --color-line: #3a362f;
+  --color-line-strong: #524d44;
+  --color-ink: #f4f3ee;
+  --color-muted: #b1ada1;
+  --color-faint: #948f84;
 
-  --color-accent:     #b79cff;  /* TEXT/ink tier in dark                     */
-  --color-accent-600: #cbb6ff;
-  --color-accent-050: #241c3d;
-  --color-accent-fill:#6d3fd8;  /* dark primary BUTTON fill (white 6.26:1)   */
+  --color-accent: #e8996f;  /* TEXT/ink tier in dark                     */
+  --color-accent-600: #f2b190;
+  --color-accent-050: #33211a;
+  --color-accent-fill: #bb5b38;  /* dark primary BUTTON fill (white 6.26:1)   */
   --color-on-accent:  #ffffff;
   --color-on-status:  #0f1219;  /* dark glyph inside a light status dot      */
 
@@ -92,7 +97,7 @@
   --color-info: #7fb0ff;  --color-info-mark: #5b95f0;  --color-info-tint: #152540;
   --color-none: #98a1b2;  --color-none-mark: #858da0;  --color-none-tint: #242833;
 
-  --ground-1:  #1a2138;
+  --ground-1:  #2a1e18;
   --edge-top:  inset 0 1px 0 rgba(255,255,255,.14);
   --edge-ring: inset 0 0 0 1px rgba(255,255,255,.03);
 
@@ -132,9 +137,8 @@
    Status -mark on the deepest track it can sit on: light 3.82 / 3.46 / 4.42 /
      4.17 / 3.59 — all clear the 3:1 graphical-object floor; dark 7.46 / 7.33 /
      4.89 / 5.03 / 3.87.
-   Accent: white on #6d34d6 = 6.75; #6d34d6 on surface 6.75, paper 6.24,
-     raised 5.97, chrome-composite 5.92, accent-050 5.75. Dark #b79cff on
-     surface 7.63, raised 6.62, chrome 6.73; white on #6d3fd8 = 6.26.
+   Accent: white on #bb5b38 = 4.50; #bb5b38 as text on white 4.50;
+     ink on #fbeee8 = 14.81. Dark #e8996f on surface 7.46.
    CHROME WORST CASE: alpha .94 over the near-black figure PNG (#0b0a09) →
      #f0f0f0 light; over pure white → #22252c dark. Both are in the table above.
      .90 was tried first and put faint at 4.22 — that is why the alpha is .94.
@@ -331,7 +335,8 @@ body {
   outline-offset: 2px;
 }
 /* no box-shadow halo: it would clobber the element's own elevation shadow.
-   #6d34d6 measures 5.92:1 against the worst chrome composite, #b79cff 6.73:1. */
+   The wordmark uses --color-accent-fill, which clears 4.5:1 on every
+   chrome composite; #c15f3c itself is only ever a mark. */
 
 /* ---- 10. NUMERALS / SCROLLBARS ----------------------------------------- */
 .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
@@ -396,16 +401,16 @@ body {
      about 1.1:1 — an invisible report. This is not optional. */
   :root, :root[data-theme="dark"] {
     --color-paper:  #ffffff;
-    --color-surface:#ffffff;
-    --color-well:   #f2f4f8;
+    --color-surface: #ffffff;
+    --color-well: #f4f3ee;
     --color-track:  #f2f4f8;
-    --color-line:   #c8ccd6;
-    --color-line-strong:#a9b0bd;
-    --color-ink:    #101319;
-    --color-muted:  #414857;
-    --color-faint:  #545b6a;
-    --color-accent: #5a25bd;  --color-accent-600:#5a25bd;
-    --color-accent-050:#f2edfc; --color-accent-fill:#5a25bd;
+    --color-line: #ddd9cf;
+    --color-line-strong:#b1ada1;
+    --color-ink:    #1f1d1a;
+    --color-muted:  #57534a;
+    --color-faint:  #6b665c;
+    --color-accent: #a34726;  --color-accent-600:#a34726;
+    --color-accent-050:#fbeee8; --color-accent-fill:#a34726;
     --color-on-status:#ffffff;
     --color-pass:#0b7050; --color-pass-mark:#0b7050; --color-pass-tint:#ffffff;
     --color-warn:#7a5004; --color-warn-mark:#7a5004; --color-warn-tint:#ffffff;

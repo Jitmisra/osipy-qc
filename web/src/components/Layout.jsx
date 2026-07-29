@@ -19,11 +19,12 @@ function Logo() {
   )
 }
 
+/* One icon geometry across the app: a 24-unit grid, 1.75 stroke, rounded caps
+   and joins, and shapes built from rounded rectangles rather than hard squares
+   so they sit with the interface's radii instead of fighting them. */
 const Icon = {
-  grid: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
-  book: 'M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2zM19 3v18',
-  plus: 'M12 5v14M5 12h14',
-  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  grid: 'M4 5.5A1.5 1.5 0 0 1 5.5 4h3A1.5 1.5 0 0 1 10 5.5v3A1.5 1.5 0 0 1 8.5 10h-3A1.5 1.5 0 0 1 4 8.5zM14 5.5A1.5 1.5 0 0 1 15.5 4h3A1.5 1.5 0 0 1 20 5.5v3A1.5 1.5 0 0 1 18.5 10h-3A1.5 1.5 0 0 1 14 8.5zM4 15.5A1.5 1.5 0 0 1 5.5 14h3A1.5 1.5 0 0 1 10 15.5v3A1.5 1.5 0 0 1 8.5 20h-3A1.5 1.5 0 0 1 4 18.5zM14 15.5A1.5 1.5 0 0 1 15.5 14h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a1.5 1.5 0 0 1-1.5-1.5z',
+  plus: 'M12 6.5v11M6.5 12h11',
 }
 
 function NavItem({ to, d, children, end }) {
@@ -67,14 +68,14 @@ function ThemeToggle() {
       className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-muted)] transition-colors hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-none" aria-hidden="true">
+           strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="flex-none" aria-hidden="true">
         {dark ? (
           <>
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            <circle cx="12" cy="12" r="4.2" />
+            <path d="M12 3.2v1.6M12 19.2v1.6M4.9 4.9l1.15 1.15M17.95 17.95l1.15 1.15M3.2 12h1.6M19.2 12h1.6M4.9 19.1l1.15-1.15M17.95 6.05l1.15-1.15" />
           </>
         ) : (
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+          <path d="M20.5 13.4A8.4 8.4 0 0 1 10.6 3.5a8.4 8.4 0 1 0 9.9 9.9z" />
         )}
       </svg>
     </button>
@@ -139,7 +140,7 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="no-print glass-chrome sticky top-3 z-30 mx-2 mt-2 flex h-14 min-w-0 sm:mx-3 sm:mt-3 items-center gap-2 rounded-[var(--radius-pane)] px-3 sm:gap-3 sm:px-4">
-          <span className="hidden flex-none font-bold tracking-[-.01em] text-[var(--color-accent)] sm:inline">QC-ToolBox</span>
+          <span className="hidden flex-none font-bold tracking-[-.01em] text-[var(--color-accent-fill)] sm:inline">QC-ToolBox</span>
           {cohort && (
             <>
               <Chip>🧠 {cap(cohort.organ)}</Chip>
@@ -163,12 +164,11 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
               className="inline-flex h-8 items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold transition-colors hover:border-[var(--color-line-strong)]"
             >
               {/* sliders, not a second sun: the theme toggle already owns that */}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" className="flex-none" aria-hidden="true">
-                <path d="M4 7h16M4 12h16M4 17h16" />
-                <circle cx="9" cy="7" r="1.9" fill="currentColor" stroke="none" />
-                <circle cx="15" cy="12" r="1.9" fill="currentColor" stroke="none" />
-                <circle cx="7" cy="17" r="1.9" fill="currentColor" stroke="none" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="1.75" strokeLinecap="round" className="flex-none" aria-hidden="true">
+                <path d="M4.5 7.5h15M4.5 16.5h15" />
+                <circle cx="9.5" cy="7.5" r="2.4" fill="var(--color-surface)" />
+                <circle cx="15" cy="16.5" r="2.4" fill="var(--color-surface)" />
               </svg>
               Thresholds
             </button>
@@ -176,8 +176,8 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
           {/* the one thing that creates something: primary, and last, so it is
               where the eye lands after reading the bar left to right */}
           <Button as={Link} to="/upload" variant="primary">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="1.9" strokeLinecap="round" className="flex-none" aria-hidden="true">
               <path d={Icon.plus} />
             </svg>
             Grade a new scan
