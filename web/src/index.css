@@ -60,7 +60,7 @@
 
 /* Non-utility scalars live outside @theme: they are read by hand-written CSS. */
 :root {
-  --ground-1:    #f7efe9;                       /* the single aurora radial  */
+  --ground-1:    transparent;                       /* the single aurora radial  */
   --edge-top:    inset 0 1px 0 rgba(255,255,255,.92);  /* specular top edge  */
   --edge-ring:   inset 0 0 0 1px rgba(16,19,26,.045);
   --blur-chrome: 30px;  --sat-chrome: 180%;
@@ -97,7 +97,7 @@
   --color-info: #7fb0ff;  --color-info-mark: #5b95f0;  --color-info-tint: #152540;
   --color-none: #98a1b2;  --color-none-mark: #858da0;  --color-none-tint: #242833;
 
-  --ground-1:  #2a1e18;
+  --ground-1:  transparent;
   --edge-top:  inset 0 1px 0 rgba(255,255,255,.14);
   --edge-ring: inset 0 0 0 1px rgba(255,255,255,.03);
 
@@ -160,11 +160,11 @@
    stacking context, nothing to z-index-fight. The user SEES it: the shell is
    inset 12px and every gutter between opaque panes shows it. */
 html {
+  /* A flat white page. The radial wash that used to sit here existed to give the
+     frosted chrome something to blur; on white it only read as a smudge, and the
+     chrome is legible without it. Surfaces are separated by a border and a soft
+     shadow, not by a change of ground colour. */
   background-color: var(--color-paper);
-  background-image: radial-gradient(118% 80% at 8% -14%,
-                    var(--ground-1) 0%, transparent 60%);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
   color-scheme: light;
 }
 :root[data-theme="dark"] { color-scheme: dark; }
@@ -184,7 +184,9 @@ body {
 
 /* ---- 1. GLASS CHROME — sidebar + top bar. Real content scrolls beneath. -- */
 .glass-chrome {
-  background-color: rgba(255,255,255,.94);
+  /* the page is white, so near-white glass would vanish; a whisper of the warm
+     neutral plus a real border keeps the floating islands readable as objects */
+  background-color: rgba(252,251,250,.82);
   /* the sheen is a BACKGROUND LAYER on the element itself, never a positioned
      ::before — a pseudo-element paints above in-flow text and would wash the
      title from 16:1 to ~2:1. This cannot. */
@@ -192,7 +194,7 @@ body {
                     rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 46%);
   -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(var(--sat-chrome));
           backdrop-filter: blur(var(--blur-chrome)) saturate(var(--sat-chrome));
-  border: 1px solid rgba(16,19,26,.07);
+  border: 1px solid rgba(31,29,26,.10);
   box-shadow: var(--edge-top),
               inset 0 -1px 0 rgba(16,19,26,.035),
               0 2px 4px rgba(20,26,48,.05),
@@ -215,7 +217,7 @@ body {
   background-color: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-pane);
-  box-shadow: var(--edge-top), var(--shadow-e1);
+  box-shadow: 0 1px 2px rgba(31,29,26,.04), 0 6px 20px -12px rgba(31,29,26,.14);
 }
 /* In dark, a faint raking sheen is what makes an opaque pane read as lifted
    glass; in light a white sheen on a white pane is invisible, so there is none. */
