@@ -1,0 +1,43 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One web service: the Python QC server, which also serves the built React app.
+# There is no separate frontend deploy, because the frontend calls same-origin
+# paths (/api/cohort, /run) and has no configurable API base.
+#
+# The build has two halves. Node builds the React bundle into web/dist, which is
+# gitignored and therefore absent from a fresh clone; Python then installs the
+# package that serves it. Both must run, in that order, or the server starts and
+# serves nothing.
+services:
+  - type: web
+    name: osipy-qc
+    runtime: python
+    plan: free
+    # The free plan sleeps after inactivity; the first request afterwards pays a
+    # cold start of roughly 30-60s while the cohort is re-graded.
+    region: oregon
+    repo: https://github.com/Jitmisra/osipy-qc
+    branch: main
+    buildCommand: |
+      set -e
+      npm --prefix web ci
+      npm --prefix web run build
+      pip install --upgrade pip
+      pip install .
+    # The synthetic demo cohort, deliberately — NOT --dashboard output.
+    #
+    # Two reasons. A clean checkout contains only output/.gitkeep, so grading that
+    # folder finds no subjects and the process exits non-zero, which would
+    # crash-loop the service. And output/ holds real participant scans, which must
+    # not be published to a public repository or a public URL.
+    #
+    # 0.0.0.0 is required: the server binds loopback by default, so Render would
+    # see a service that never accepts a connection. $PORT is assigned by Render.
+    startCommand: osipy-qc --dashboard-demo --no-browser --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/cohort
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: NODE_VERSION
+        value: "22"

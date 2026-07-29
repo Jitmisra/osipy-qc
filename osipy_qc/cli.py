@@ -9,8 +9,10 @@ Command-line entry point.
 from __future__ import annotations
 
 import argparse
+import os
 
 from .core.config import Provenance, THRESHOLD_PROVENANCE
+
 from .report import run_qc
 
 
@@ -64,7 +66,11 @@ def main(argv=None) -> int:
                     help="cohort dashboard: grade every subject subfolder of FOLDER and serve it")
     ap.add_argument("--dashboard-demo", action="store_true",
                     help="cohort dashboard populated with a synthetic demo cohort")
-    ap.add_argument("--port", type=int, default=8000, help="port for the web UI (default 8000)")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)),
+                    help="port for the web UI (default 8000, or $PORT)")
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),
+                    help="interface to bind (default 127.0.0.1; use 0.0.0.0 to accept "
+                         "traffic from outside this machine)")
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser window")
     args = ap.parse_args(argv)
 
@@ -79,7 +85,7 @@ def main(argv=None) -> int:
             from .batch import demo_cohort
             print("grading a synthetic demo cohort...")
             serve_dashboard(demo_cohort(14), dataset="demo_cohort (synthetic)",
-                            port=args.port, open_browser=open_browser)
+                            host=args.host, port=args.port, open_browser=open_browser)
         else:
             from .batch import grade_folder
             print(f"grading subjects under {args.dashboard} ...")
@@ -87,13 +93,13 @@ def main(argv=None) -> int:
             if not subs:
                 ap.error(f"no subject folders with a CBF map found under {args.dashboard!r}")
                 return 2
-            serve_dashboard(subs, dataset=args.dashboard, port=args.port,
-                            open_browser=open_browser)
+            serve_dashboard(subs, dataset=args.dashboard, host=args.host,
+                            port=args.port, open_browser=open_browser)
         return 0
 
     if args.serve:
         from .web import serve
-        serve(port=args.port, open_browser=not args.no_browser)
+        serve(host=args.host, port=args.port, open_browser=not args.no_browser)
         return 0
 
     from .core.config import for_population
