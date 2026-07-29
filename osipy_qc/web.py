@@ -159,6 +159,17 @@ def _upload_page(error: str = "") -> str:
         <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
     </div>
 
+    <div class="field-label">Raw acquisition
+      <span class="opt">optional &mdash; unlocks the schema, M0, motion and data-type checks</span></div>
+    <div class="grid2">
+      {_dropzone("raw_asl", "ASL series", "4D control/label, or dM")}
+      {_dropzone("raw_m0", "M0", "the calibration scan")}
+      {_dropzone("raw_t1", "Structural", "T1 / MPRAGE")}
+      <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
+        <div class="txt"><small>Keep the original filenames &mdash; the vendor and
+        sequence are read from them.</small></div></div>
+    </div>
+
     <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
     <div class="seg">{seg}</div>
     <p class="hint">A neonate's normal GM CBF (~16) would look abnormal against the adult
@@ -204,7 +215,12 @@ def _upload_page(error: str = "") -> str:
     overlay.classList.add('on');
     fetch('/run', {{method:'POST', body:new FormData(form)}})
       .then(function(r){{ return r.text(); }})
-      .then(function(html){{ document.open(); document.write(html); document.close(); }})
+      .then(function(html){{
+        // give the report a real address: reloadable, shareable, and the back
+        // button returns to the form rather than to nothing
+        history.pushState({{}}, '', '/result');
+        document.open(); document.write(html); document.close();
+      }})
       .catch(function(){{ overlay.classList.remove('on'); form.submit(); }});
   }});
 }})();
@@ -299,6 +315,34 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         paths = {k: _save(k) for k in ("cbf", "gm", "wm", "csf")}
         inputs = load_cbf_inputs(paths["cbf"], gm=paths["gm"], wm=paths["wm"],
                                  csf=paths["csf"])
+
+        # Raw acquisition files, if any were sent. These are what Stream A needs:
+        # without them the schema, M0, motion and data-type checks have nothing
+        # to look at and correctly return UNKNOWN.
+        #
+        # Their FILENAMES carry the signal here — classify_role reads them to tell
+        # an ASL series from an M0 from a T1 — so unlike the CBF map they cannot
+        # simply be renamed to the form field. They are sanitised instead: the
+        # basename is stripped of any path and reduced to safe characters, which
+        # keeps the role legible without trusting the client.
+        raw_dir = os.path.join(tmp, "raw")
+        saved_raw = False
+        for field, (fname, data) in fields.items():
+            if not field.startswith("raw") or not data:
+                continue
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
+            if not safe.endswith((".nii", ".nii.gz")):
+                safe += ".nii.gz"
+            os.makedirs(raw_dir, exist_ok=True)
+            with open(os.path.join(raw_dir, safe), "wb") as fh:
+                fh.write(data)
+            saved_raw = True
+
+        if saved_raw:
+            from .io import load_folder
+            # the CBF-derived inputs win where the two overlap; the raw folder
+            # only adds what it alone can know
+            inputs = {**load_folder(raw_dir), **inputs}
         report = run_qc(inputs, cfg=cfg)
 
         from .api import subject_payload
@@ -324,7 +368,7 @@ def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> str:
     _grade_upload(fields)                       # grades and remembers the subject
     subject = next(reversed(_UPLOADS.values()))
     return render_html(subject.report, inputs=subject.inputs, cfg=subject.cfg,
-                       title=f"ASL QC report — {subject.sid}")
+                       served=True, title=f"ASL QC report — {subject.sid}")
 
 
 def _safe_back(raw: str) -> str:
@@ -568,6 +612,15 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             if getattr(self.server, "spa", True) and self._serve_spa(path):
                 return
 
+            if path == "/result":
+                if _UPLOADS:
+                    from .report_html import render_html
+                    sub = next(reversed(_UPLOADS.values()))
+                    self._send(render_html(sub.report, inputs=sub.inputs, cfg=sub.cfg,
+                                           served=True, title=f"ASL QC report — {sub.sid}"))
+                else:
+                    self._send(_upload_page())
+                return
             if path in ("/", "/index.html", "/upload"):
                 self._send(_upload_page())
             else:

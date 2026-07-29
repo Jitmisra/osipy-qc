@@ -54,6 +54,11 @@ _REPORT_CSS = """
   background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden;
   overflow:hidden;border:1px solid var(--line)}
 .hero .eyebrow{opacity:.9}
+.newscan{position:absolute;top:1.1rem;right:1.2rem;font-size:.82rem;font-weight:600;
+  color:var(--accent-fill);background:var(--surface);border:1px solid var(--line);
+  border-radius:100px;padding:.4rem .85rem;text-decoration:none}
+.newscan:hover{border-color:var(--accent);text-decoration:none}
+@media print{.newscan{display:none}}
 .hero::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--hero-fg,var(--accent))}
 .hero h1{font-size:clamp(1.8rem,4vw,2.5rem);margin:.35rem 0 .3rem;font-weight:700}
 .hero p{margin:0;font-size:1rem;max-width:60ch}
@@ -77,6 +82,14 @@ figure{margin:0;background:var(--surface);border:1px solid var(--line);border-ra
 figure img{display:block;width:100%;height:auto;background:#0c0b0a}
 figure svg{display:block;width:100%;height:auto;background:var(--surface);padding:.4rem}
 figcaption{font-size:.78rem;color:var(--muted);padding:.6rem .8rem;border-top:1px solid var(--line)}
+.gallery figure img{cursor:zoom-in}
+/* the lightbox is a :target, so it needs no JavaScript and survives being
+   saved as a single file and opened offline */
+.lb{position:fixed;inset:0;background:rgba(15,14,13,.86);display:none;
+  align-items:center;justify-content:center;padding:2rem;z-index:50;cursor:zoom-out}
+.lb:target{display:flex}
+.lb img{max-width:96vw;max-height:92vh;border-radius:var(--radius-sm);background:#0b0a09}
+@media print{.lb{display:none!important}}
 
 /* driving-check chips in the hero */
 .drivers{margin-top:1rem;font-size:.82rem;color:var(--muted);display:flex;flex-wrap:wrap;
@@ -147,7 +160,7 @@ _SEV = {"FAIL": 0, "WARN": 1, "INFO": 2, "PASS": 3, "UNKNOWN": 4, "N/A": 5}
 # --------------------------------------------------------------------------- #
 # hero
 # --------------------------------------------------------------------------- #
-def _hero(d: dict, cfg: QCConfig) -> str:
+def _hero(d: dict, cfg: QCConfig, served: bool = False) -> str:
     overall = d["overall_verdict"]
     fg, bg = VERDICT_COLOURS.get(overall, ("#8A8079", "#F1ECE4"))
     chips = []
@@ -156,12 +169,16 @@ def _hero(d: dict, cfg: QCConfig) -> str:
         chips.append(f'<span class="chip"><span class="dot" style="background:{c}"></span>'
                      f'{n} {esc(v)}</span>')
     gloss = _OVERALL_GLOSS.get(overall, "")
+    # only meaningful when the report is being served; a saved file has nowhere
+    # to go back to, and the link simply will not resolve
+    new_scan = ('<a class="newscan" href="/">&#43; Grade a new scan</a>' if served else "")
     drivers = _driver_chips(d)
     # The surface stays neutral and a spine down the edge carries the status.
     # A whole panel flooded with verdict colour competes with the accent the rest
     # of the product is built from, and shouts a fact stated three lines later.
     return (
         f'<div class="hero" style="--hero-fg:{fg}">'
+        f'{new_scan}'
         f'<div class="eyebrow" style="color:{fg}">OVERALL VERDICT</div>'
         f'<h1 style="color:{fg}">{esc(overall)}</h1>'
         f'<p>{esc(gloss)}</p>'
@@ -353,8 +370,21 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
         except Exception as exc:
             figs.append(f'<figure><figcaption>WM histogram unavailable: {esc(exc)}</figcaption></figure>')
 
+    # Give each raster figure a click-to-zoom target. SVG histograms are already
+    # vector and scale with the page, so only the PNG mosaics get one.
+    import re as _re
+    panes: list[str] = []
+    for i, fig in enumerate(figs):
+        m = _re.search(r'<img([^>]*?)src="([^"]+)"', fig)
+        if not m:
+            continue
+        fid = f"fig{i}"
+        figs[i] = fig.replace(m.group(0), f'<a href="#{fid}"><img{m.group(1)}src="{m.group(2)}"></a>', 1)
+        figs[i] = figs[i].replace("</a>", "</a>", 1)
+        panes.append(f'<a class="lb" id="{fid}" href="#_"><img alt="" src="{m.group(2)}"></a>')
+
     return ('<div class="section-title">Images</div><div class="gallery">'
-            + "".join(figs) + "</div>")
+            + "".join(figs) + "</div>" + "".join(panes))
 
 
 # --------------------------------------------------------------------------- #
@@ -420,7 +450,7 @@ REPORT_CSS = _REPORT_CSS
 
 
 def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
-                with_note: bool = True) -> str:
+                with_note: bool = True, served: bool = False) -> str:
     """The inner report content (hero + KPIs + figures + grouped checks), without
     the page chrome. Reused by both the standalone report and the dashboard's
     subject deep-dive so there is exactly one report renderer."""
@@ -438,7 +468,7 @@ def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
     # Findings before images: on a FAIL scan the checks are the diagnosis and the
     # mosaics are the supporting evidence.
     return (
-        f'{_hero(d, cfg)}'
+        f'{_hero(d, cfg, served)}'
         f'{_kpi_tiles(_by_name(d), cfg)}'
         f'{_acq_panel(cfg)}'
         f'{_checks_grouped(report, d)}'
@@ -448,6 +478,7 @@ def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
 
 
 def render_html(report, inputs: dict | None = None, cfg: QCConfig | None = None,
+                served: bool = False,
                 title: str = "ASL QC report") -> str:
     """Render a QCReport (+ the inputs it graded) as one self-contained HTML page."""
     cfg = cfg or QCConfig()
@@ -457,7 +488,7 @@ def render_html(report, inputs: dict | None = None, cfg: QCConfig | None = None,
         '<div class="topbar">'
         f'{brand("ASL quality control")}'
         f'<div class="spacer"></div><div class="meta mono">{meta}</div></div>'
-        f'<div class="wrap">{report_body(report, inputs, cfg)}</div>'
+        f'<div class="wrap">{report_body(report, inputs, cfg, served=served)}</div>'
         '<div class="footer">Generated by osipy-qc &mdash; pure NumPy + nibabel. '
         'Every pixel is drawn from the arrays the checks graded; images encoded with the '
         'standard library only.</div>'
