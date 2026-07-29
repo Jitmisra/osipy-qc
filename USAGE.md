@@ -38,8 +38,11 @@ python -m osipy_qc <folder>      # identical, module form
 osipy-qc --serve            # -> http://127.0.0.1:8000
 ```
 Upload a CBF map (+ optional GM/WM/CSF), pick the population, get the full visual
-report. Files are graded in a temp folder and deleted immediately — nothing is
-stored or sent anywhere.
+report. The uploaded files are written to a temp folder and deleted as soon as
+grading finishes. The graded arrays of the **last few uploads** are then held in
+memory so their figures can be drawn on demand; they are evicted as new uploads
+arrive and are gone when the process stops. Nothing is written to disk and
+nothing is sent anywhere.
 
 > ⚠️ This is a **local** tool. It binds to `127.0.0.1` and is deliberately not
 > hardened for public hosting (no auth, no rate limiting, no sandboxing around the

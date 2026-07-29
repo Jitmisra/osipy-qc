@@ -221,7 +221,8 @@ def test_end_to_end_upload_produces_a_report(tmp_path):
         assert data["figures"], "figures survive an upload"
         # and a figure actually renders from the retained arrays
         fig = data["figures"][0]
-        url = base + f"/api/subject/{urllib.parse.quote(data['sid'])}/figure/{fig['name']}.png"
+        # addressed by the upload's token, never by its filename
+        url = base + f"/api/subject/{urllib.parse.quote(data['token'])}/figure/{fig['name']}.png"
         img = urllib.request.urlopen(url)
         assert img.status == 200 and int(img.headers["Content-Length"]) > 500
     finally:
@@ -268,5 +269,57 @@ def test_run_serves_html_when_json_was_not_requested():
         html = res.read().decode()
         assert html.startswith("<!DOCTYPE html>")
         assert "1.qei" in html
+    finally:
+        srv.shutdown()
+
+
+def test_an_upload_is_not_readable_by_its_filename():
+    """One visitor must not be able to read another's scan.
+
+    Uploads used to be cached under the client's own filename, so anyone who
+    guessed it — and "perfusion_calib.nii.gz" is what half of oxford_asl's
+    output is called — could fetch a stranger's report and their brain images
+    from a public instance. They are keyed by an unguessable token now.
+    """
+    import nibabel as nib
+
+    from osipy_qc.synth import synthetic_case
+
+    c = synthetic_case(quality="clean", seed=0)
+    aff = np.diag([3.0, 3.0, 3.0, 1.0])
+    import tempfile
+    tmp = tempfile.mkdtemp()
+
+    def blob(arr):
+        p = os.path.join(tmp, "x.nii.gz")
+        nib.save(nib.Nifti1Image(arr.astype(np.float32), aff), p)
+        with open(p, "rb") as fh:
+            return fh.read()
+
+    body = (_part("cbf", "perfusion_calib.nii.gz", blob(c.cbf))
+            + _part("gm", "gm.nii.gz", blob(c.gm))
+            + b"--B--\r\n")
+    srv, base = _serve()
+    try:
+        req = urllib.request.Request(
+            base + "/run", data=body,
+            headers={"Content-Type": "multipart/form-data; boundary=B",
+                     "Accept": "application/json"})
+        import json as _json
+        data = _json.loads(urllib.request.urlopen(req).read())
+        assert data["token"] and data["token"] != data["sid"]
+
+        # the token works
+        ok = urllib.request.urlopen(
+            base + f"/api/subject/{urllib.parse.quote(data['token'])}")
+        assert ok.status == 200
+
+        # the filename does not
+        try:
+            urllib.request.urlopen(base + "/api/subject/perfusion_calib.nii.gz")
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+        else:
+            raise AssertionError("an upload was readable by its filename")
     finally:
         srv.shutdown()

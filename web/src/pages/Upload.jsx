@@ -54,6 +54,7 @@ function Snippet({ title, code }) {
 export default function Upload() {
   const [files, setFiles] = useState({})
   const [population, setPopulation] = useState('adult')
+  const [strict, setStrict] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
@@ -71,6 +72,7 @@ export default function Upload() {
       const fd = new FormData()
       FIELDS.forEach((f) => files[f.name] && fd.append(f.name, files[f.name]))
       fd.append('population', population)
+      if (strict) fd.append('strict', '1')
       // the server returns the same payload a cohort scan does, so the result
       // is rendered here by the same components rather than dumped into a
       // new window as a foreign HTML document

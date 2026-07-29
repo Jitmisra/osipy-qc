@@ -378,14 +378,22 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, byt
 
 # The last few graded uploads, kept so their figures can be rendered on demand.
 # Bounded on purpose: the arrays are large and this is a single-process server.
+#
+# Keyed by an unguessable token, NEVER by the uploaded filename. Keying by
+# filename made every upload readable by anyone who guessed the name, and
+# "perfusion_calib.nii.gz" is what half the world's oxford_asl output is called:
+# one visitor could read another's report and their brain images.
 _UPLOADS: dict[str, object] = {}
 _UPLOAD_KEEP = 4
 
 
-def _remember_upload(subject) -> None:
-    _UPLOADS[subject.sid] = subject
+def _remember_upload(subject) -> str:
+    import secrets
+    token = secrets.token_urlsafe(18)
+    _UPLOADS[token] = subject
     while len(_UPLOADS) > _UPLOAD_KEEP:
         _UPLOADS.pop(next(iter(_UPLOADS)))
+    return token
 
 
 def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
@@ -420,7 +428,11 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             setattr(cfg, name, float(raw))
         except ValueError:
             continue
-    cfg.strict = bool(fields.get("strict", ("", b""))[1])
+    if "strict" in fields or "thr_qei_pass" in fields:
+        # only a form that actually carries the control may change it; an upload
+        # that says nothing about strictness keeps the packaged default rather
+        # than silently grading leniently
+        cfg.strict = bool(fields.get("strict", ("", b""))[1])
 
     with tempfile.TemporaryDirectory(prefix="osipy_qc_") as tmp:
         def _save(field: str) -> str | None:
@@ -480,13 +492,14 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         subject = Subject(sid=sid, report=report, inputs=inputs, cfg=cfg)
         # hold the graded arrays briefly so /figure/ can render from them; the
         # temp dir is gone by then, but the loaded arrays are not
-        _remember_upload(subject)
+        token = _remember_upload(subject)
         payload = subject_payload(subject)
         payload["uploaded"] = True
+        payload["token"] = token          # figure URLs address the token, not the name
         return payload
 
 
-def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> str:
+def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> tuple[str, str]:
     """The same grading, rendered as the self-contained HTML report.
 
     Used by the no-build console and by any client that did not ask for JSON.
@@ -494,10 +507,11 @@ def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> str:
     them — only the presentation does.
     """
     from .report_html import render_html
-    _grade_upload(fields)                       # grades and remembers the subject
-    subject = next(reversed(_UPLOADS.values()))
-    return render_html(subject.report, inputs=subject.inputs, cfg=subject.cfg,
+    payload = _grade_upload(fields)             # grades and remembers the subject
+    subject = _UPLOADS[payload["token"]]
+    html = render_html(subject.report, inputs=subject.inputs, cfg=subject.cfg,
                        served=True, title=f"ASL QC report — {subject.sid}")
+    return html, payload["token"]
 
 
 def _safe_back(raw: str) -> str:
@@ -543,11 +557,13 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):          # quieter than the noisy default
         print(f"  {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}")
 
-    def _send(self, body: str, status: int = 200) -> None:
+    def _send(self, body: str, status: int = 200, extra_headers=None) -> None:
         raw = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
+        for name, value in (extra_headers or []):
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -636,8 +652,8 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/api/subject/") and _UPLOADS:
             import urllib.parse as up
             rest = up.unquote(path[len("/api/subject/"):])
-            sid, _, fig = rest.partition("/figure/")
-            sub = _UPLOADS.get(sid if fig else rest)
+            token, _, fig = rest.partition("/figure/")
+            sub = _UPLOADS.get(token if fig else rest)
             if sub is not None:
                 if fig:
                     try:
@@ -742,9 +758,14 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             if path == "/result":
-                if _UPLOADS:
+                token = ""
+                for part in (self.headers.get("Cookie") or "").split(";"):
+                    k, _, v = part.strip().partition("=")
+                    if k == "osipy_result":
+                        token = v
+                sub = _UPLOADS.get(token)
+                if sub is not None:
                     from .report_html import render_html
-                    sub = next(reversed(_UPLOADS.values()))
                     self._send(render_html(sub.report, inputs=sub.inputs, cfg=sub.cfg,
                                            served=True, title=f"ASL QC report — {sub.sid}"))
                 else:
@@ -809,7 +830,13 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             if wants_json:
                 self._send_json(_grade_upload(fields))
             else:
-                self._send(_grade_upload_html(fields))
+                html, token = _grade_upload_html(fields)
+                # the cookie is what makes /result yours and not the next
+                # visitor's; HttpOnly so script cannot read it, Strict so it is
+                # not sent from another site
+                self._send(html, extra_headers=[
+                    ("Set-Cookie",
+                     f"osipy_result={token}; Path=/; HttpOnly; SameSite=Strict")])
         except Exception as exc:                # a bad upload must not kill the server
             traceback.print_exc()
             if "application/json" in (self.headers.get("Accept") or ""):

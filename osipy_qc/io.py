@@ -16,8 +16,25 @@ import numpy as np
 from .checks.schema import classify_role, detect_dataset
 
 
+# A NIfTI header declares its shape, and gzip hides how big that will be. A 6 MB
+# file of zeros can declare 700^3 and expand to 2.7 GB as float64 — enough to
+# take down a small host. The header is readable before any data is touched, so
+# the size is checked there rather than discovered by running out of memory.
+#
+# The ceiling is generous against real data: a 208x300x320 T1 is 160 MB and an
+# 80-volume 4D series about 141 MB, both far below it.
+MAX_ARRAY_BYTES = 768 * 1024 * 1024
+
+
 def _load(path: str) -> np.ndarray:
-    return np.asanyarray(nib.load(path).dataobj).astype(float)
+    img = nib.load(path)
+    want = int(np.prod(img.shape)) * 8          # float64, what .astype(float) gives
+    if want > MAX_ARRAY_BYTES:
+        raise ValueError(
+            f"{os.path.basename(path)} declares {tuple(int(x) for x in img.shape)}, "
+            f"which is {want / 1e9:.1f} GB in memory; the limit is "
+            f"{MAX_ARRAY_BYTES / 1e6:.0f} MB.")
+    return np.asanyarray(img.dataobj).astype(float)
 
 
 def _find_niftis(folder: str) -> list[str]:
