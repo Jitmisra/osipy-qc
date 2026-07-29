@@ -57,6 +57,11 @@ _POP_ORDER = ["adult", "neonate"]
 _POP_LABELS = {"adult": "adult", "neonate": "neonate"}
 
 _CONSOLE_CSS = """
+.thr-note{font-size:.8rem;color:var(--muted);margin:.5rem 0 .9rem}
+.thr-g{margin-bottom:1rem}
+.thr-g h4{margin:0 0 .45rem;font-size:.74rem;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent-600)}
+
 .thr{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.7rem;margin:.7rem 0}
 .thr-f{display:flex;flex-direction:column;gap:.25rem}
 .thr-f span{font-size:.76rem;color:var(--muted)}
@@ -142,12 +147,34 @@ _FILE_IC = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
             '<polyline points="13 2 13 9 20 9"/></svg>')
 
 
-def _thr(field: str, label: str, default: float, step: float) -> str:
-    """One threshold input. Left blank, the packaged default is used, so the
-    form never has to restate a value it does not intend to change."""
-    return (f'<label class="thr-f"><span>{esc(label)}</span>'
-            f'<input type="number" name="thr_{field}" step="{step}" '
-            f'placeholder="{default:g}" inputmode="decimal"></label>')
+def _threshold_groups() -> tuple[str, str]:
+    """Every tunable threshold, grouped, plus both populations' defaults as JSON.
+
+    The defaults are shipped to the page so choosing adult or neonate can update
+    what each field shows. Ten of them genuinely differ — a neonate's normal GM
+    CBF is around 16, where an adult's band starts at 40 — so a form that showed
+    adult numbers under a neonate heading would be telling the reader something
+    untrue about the grading they are about to get.
+    """
+    import json as _json
+
+    from .batch import TUNABLE_GROUPS
+    from .core.config import for_population
+
+    defaults = {pop: {name: getattr(for_population(pop), name)
+                      for _g, fields in TUNABLE_GROUPS for name, _l in fields}
+                for pop in ("adult", "neonate")}
+
+    out: list[str] = []
+    for group, fields in TUNABLE_GROUPS:
+        cells = "".join(
+            f'<label class="thr-f"><span>{esc(label)}</span>'
+            f'<input type="number" name="thr_{name}" step="any" inputmode="decimal" '
+            f'data-thr="{name}" placeholder="{defaults["adult"][name]:g}"></label>'
+            for name, label in fields
+        )
+        out.append(f'<div class="thr-g"><h4>{esc(group)}</h4><div class="thr">{cells}</div></div>')
+    return "".join(out), _json.dumps(defaults)
 
 
 def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
@@ -169,6 +196,7 @@ def _upload_page(error: str = "") -> str:
         f'<span title="{p}">{esc(_POP_LABELS.get(p, p))}</span></label>'
         for p in pops
     )
+    thr_groups, thr_defaults = _threshold_groups()
     err = f'<div class="err"><b>Could not grade that.</b> {esc(error)}</div>' if error else ""
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -214,15 +242,9 @@ def _upload_page(error: str = "") -> str:
 
     <details class="manual">
       <summary>Thresholds &mdash; change what counts as a pass</summary>
-      <div class="thr">
-        {_thr("qei_pass", "QEI, pass above", 0.55, 0.01)}
-        {_thr("qei_warn", "QEI, fail below", 0.5, 0.01)}
-        {_thr("gm_cbf_lo", "GM CBF, band low", 40, 1)}
-        {_thr("gm_cbf_hi", "GM CBF, band high", 100, 1)}
-        {_thr("ratio_pass", "GM/WM ratio, min", 1.5, 0.1)}
-        {_thr("coverage_warn", "GM coverage, min", 0.9, 0.01)}
-        {_thr("scov_vascular", "sCoV, vascular above", 0.67, 0.01)}
-      </div>
+      <p class="thr-note">Every field is optional. Leave one blank and the packaged value for
+        the chosen population is used &mdash; the greyed number is what that would be.</p>
+      {thr_groups}
       <label class="strict">
         <input type="checkbox" name="strict" value="1" checked>
         <span>Strict &mdash; an uncalibrated cut-off may raise a FAIL. Turn off to
@@ -269,6 +291,24 @@ def _upload_page(error: str = "") -> str:
   // With JS off, the form does a normal POST and still works.
   var form = document.getElementById('qc');
   var overlay = document.getElementById('overlay');
+  // Choosing a population rewrites what each threshold field shows, because ten
+  // of them genuinely differ: a neonate's normal GM CBF is about 16, where the
+  // adult band starts at 40. Showing adult numbers under a neonate heading would
+  // misdescribe the grading about to happen.
+  var THR = {thr_defaults};
+  function applyPopulation(){{
+    var pop = (document.querySelector('input[name="population"]:checked') || {{}}).value || 'adult';
+    var d = THR[pop] || THR.adult;
+    document.querySelectorAll('input[data-thr]').forEach(function(el){{
+      var v = d[el.getAttribute('data-thr')];
+      if(v !== undefined) el.placeholder = String(v);
+    }});
+  }}
+  document.querySelectorAll('input[name="population"]').forEach(function(r){{
+    r.addEventListener('change', applyPopulation);
+  }});
+  applyPopulation();
+
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
   var zone = document.querySelector('.dropall');
