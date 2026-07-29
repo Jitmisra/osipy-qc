@@ -37,7 +37,7 @@ function App() {
           path="/"
           element={
             loading ? <OverviewSkeleton />
-              : cohort ? <Overview cohort={cohort} onOpenThresholds={openThresholds} />
+              : cohort ? <Overview cohort={cohort} />
               : <NoCohort error={error} />
           }
         />

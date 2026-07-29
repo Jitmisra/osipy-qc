@@ -39,7 +39,7 @@ function Zone({ label, meta, children }) {
   )
 }
 
-export default function Overview({ cohort, onOpenThresholds }) {
+export default function Overview({ cohort }) {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState({ key: 'severity', dir: 'asc' })
@@ -87,7 +87,6 @@ export default function Overview({ cohort, onOpenThresholds }) {
           <p className="mt-2 font-mono text-[13px] text-[var(--color-muted)]">{cohort.dataset}</p>
         </div>
         <div className="no-print flex gap-2">
-          <Button onClick={onOpenThresholds}>Thresholds</Button>
           <Button variant="primary" onClick={() => window.print()}>Print / Save PDF</Button>
         </div>
       </header>
