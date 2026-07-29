@@ -26,13 +26,6 @@ VERDICT_COLOURS: dict[str, tuple[str, str]] = {
     "INFO": ("#3B6FA8", "#E7EEF6"),
 }
 
-# Provenance level -> (label, colour) for the threshold badges.
-PROVENANCE_COLOURS: dict[str, tuple[str, str]] = {
-    "published": ("published", "#2A8A73"),
-    "implementation": ("implementation", "#3B6FA8"),
-    "uncalibrated": ("uncalibrated", "#B26A0B"),
-}
-
 # The OSIPI mark — a pink->purple infinity loop, as on the proposal. Rendered
 # for the user's own OSIPI project, matching their submitted branding.
 LOGO_SVG = (

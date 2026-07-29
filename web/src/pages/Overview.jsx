@@ -208,13 +208,15 @@ export default function Overview({ cohort, onOpenThresholds }) {
                 {rows.map((s) => (
                   <tr
                     key={s.sid}
-                    className="group h-10 border-b border-[var(--color-line)] transition-colors last:border-0 hover:bg-[var(--color-paper)] focus-within:bg-[var(--color-paper)]"
+                    className="group relative h-10 border-b border-[var(--color-line)] transition-colors last:border-0 hover:bg-[var(--color-paper)] focus-within:bg-[var(--color-paper)]"
                   >
                     <td className="truncate py-0 pl-5 align-middle">
                       {/* the id is the link: one accent-free target, no button row */}
+                      {/* the anchor stays real for keyboard and right-click, but
+                          its hit area is stretched over the entire row */}
                       <Link
                         to={`/subject/${encodeURIComponent(s.sid)}`}
-                        className="font-mono font-semibold hover:text-[var(--color-accent-600)] hover:underline"
+                        className="font-mono font-semibold after:absolute after:inset-0 hover:text-[var(--color-accent-600)] hover:underline"
                       >
                         {s.sid}
                       </Link>
@@ -243,14 +245,6 @@ export default function Overview({ cohort, onOpenThresholds }) {
                     </td>
                     <td className={`truncate py-0 align-middle ${s.incomplete ? 'text-[var(--color-faint)]' : ''}`}>
                       {s.flag}
-                    </td>
-                    <td className="py-0 pr-5 text-right align-middle">
-                      <span
-                        aria-hidden="true"
-                        className="text-[var(--color-faint)] opacity-0 transition-opacity group-hover:opacity-100"
-                      >
-                        →
-                      </span>
                     </td>
                   </tr>
                 ))}

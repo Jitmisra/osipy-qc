@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fetchSubject, figureUrl } from '../lib/api.js'
 import {
-  Card, SectionTitle, Button, VerdictPill, SubjectSkeleton, ErrorNote, Lightbox,
+  Card, SectionTitle, Button, VerdictPill, VerdictDot, SubjectSkeleton, ErrorNote, Lightbox,
   BandMeter, verdictOf,
 } from '../lib/ui.jsx'
 
@@ -18,22 +18,22 @@ function CheckCard({ check }) {
   const v = verdictOf(check.verdict)
   const rows = Object.entries(check.metric || {})
   return (
-    <Card className="overflow-hidden" id={`chk-${check.id.replace(/\./g, '-')}`}>
+    <Card className="panel--card overflow-hidden" id={`chk-${check.id.replace(/\./g, '-')}`}>
       <div className="flex">
         {/* a provisional verdict gets a striped rail, so an uncalibrated cut-off
             never reads as a hard, evidence-backed failure */}
         <div
-          className="w-[5px] flex-none"
+          className="w-1 flex-none"
           style={
             check.provisional
               ? { backgroundImage: `repeating-linear-gradient(45deg, ${v.fg} 0 4px, transparent 4px 8px)` }
               : { background: v.fg }
           }
         />
-        <div className="min-w-0 flex-1 p-4">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1 px-5 py-4">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span className="text-[17px] font-semibold tracking-[-.01em]">{check.label}</span>
             <VerdictPill verdict={check.verdict} />
-            <span className="font-semibold">{check.label}</span>
             <span className="font-mono text-[11px] text-[var(--color-faint)]">{check.id}</span>
             {check.provisional && (
               <span
@@ -45,7 +45,7 @@ function CheckCard({ check }) {
               </span>
             )}
           </div>
-          <p className="mt-1.5 text-[13.5px] text-[var(--color-muted)]">{check.reason}</p>
+          <p className="mt-1.5 text-[14.5px] leading-relaxed text-[var(--color-ink)]">{check.reason}</p>
           {rows.length > 0 && (
             <>
               <button
@@ -134,14 +134,21 @@ export default function Subject({ cohort }) {
       </div>
 
       {/* verdict hero */}
-      <Card className="mb-4 overflow-hidden p-6"
-            style={{ background: `linear-gradient(180deg, ${v.tint}, var(--color-surface))` }}>
+      {/* a flat status wash and a colour spine, not a gradient: the gradient
+          only muddied the tint and would not survive print */}
+      <Card className="panel--hero relative mb-4 overflow-hidden p-6"
+            style={{ background: v.tint }}>
+        <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1.5"
+              style={{ background: v.fg, printColorAdjust: 'exact' }} />
         <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: v.fg }}>
           Overall verdict
         </div>
-        <h2 className="mt-1.5 text-[40px] font-bold leading-none tracking-tight" style={{ color: v.fg }}>
-          {data.verdict}
-        </h2>
+        <div className="mt-2 flex items-center gap-4">
+          <VerdictDot verdict={data.verdict} size={56} />
+          <h2 className="text-[40px] font-bold leading-none tracking-[-.02em]" style={{ color: v.fg }}>
+            {data.verdict}
+          </h2>
+        </div>
         <p className="mt-2 max-w-2xl text-[15px]">{GLOSS[data.verdict] || ''}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {Object.entries(data.summary || {}).map(([k, n]) => (
@@ -172,59 +179,6 @@ export default function Subject({ cohort }) {
           cells whenever a check did not produce its metric, and five competing
           numerals in five card frames shouted at each other. Rows also let each
           measurement sit beside the range it was graded on. */}
-      {data.kpis.length > 0 && (
-        <Card className="mb-6 overflow-hidden p-0 shadow-[var(--shadow-e1)]">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3">
-            <h2 className="text-[13px] font-semibold uppercase tracking-[0.09em] text-[var(--color-faint)]">
-              Measured against expectation
-            </h2>
-            <span className="font-mono text-[11px] text-[var(--color-faint)]">
-              ranges and their sources: Thresholds, top right
-            </span>
-          </div>
-          <ul>
-            {data.kpis.map((k) => {
-              const kv = verdictOf(k.verdict)
-              const text = k.format === '0.000' ? k.value.toFixed(3)
-                : k.format === '0.00' ? k.value.toFixed(2)
-                : k.format === '0.0' ? k.value.toFixed(1)
-                : Math.round(k.value).toLocaleString()
-              return (
-                <li
-                  key={k.key}
-                  className="grid items-center gap-4 border-b border-[var(--color-line)] px-5 py-2.5 last:border-0 md:grid-cols-[150px_112px_minmax(160px,1fr)_minmax(0,210px)]"
-                >
-                  <a href={`#chk-${k.check.replace(/\./g, '-')}`} className="group min-w-0">
-                    <span className="block truncate text-[12.5px] font-semibold group-hover:text-[var(--color-accent-600)]">
-                      {k.label}
-                    </span>
-                    <span className="block truncate font-mono text-[10px] text-[var(--color-faint)]">
-                      {k.check}
-                    </span>
-                  </a>
-                  <div className="flex items-baseline gap-1 md:justify-end">
-                    <span className="num text-[19px] font-semibold leading-none" style={{ color: kv.fg }}>
-                      {text}
-                    </span>
-                    {k.unit && <span className="text-[10.5px] text-[var(--color-muted)]">{k.unit}</span>}
-                  </div>
-                  <BandMeter value={k.value} band={k.band} axis={k.axis} color={kv.fg} className="!mt-0" />
-                  <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-faint)]">
-                    <span
-                      aria-label={k.verdict}
-                      title={k.verdict}
-                      className="inline-block h-2 w-2 flex-none rounded-full"
-                      style={{ background: kv.fg }}
-                    />
-                    <span className="truncate">{k.foot}</span>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </Card>
-      )}
-
       {/* findings before images: the checks are the diagnosis, the pictures are evidence */}
       {Object.entries(byStream).map(([stream, checks]) => (
         <section key={stream} className="mb-6">

@@ -47,26 +47,38 @@ export function VerdictPill({ verdict, size = 'sm', className = '' }) {
  * scales unchanged up to the 72px hero medallion — so status never depends on
  * hue alone.
  */
+const MARK_PATH = {
+  PASS: 'M4.5 8.6 7 11.1l4.6-5',
+  WARN: 'M8 4.4v4.4M8 11.2v.1',
+  FAIL: 'M5 5l6 6M11 5l-6 6',
+  INFO: 'M8 7.2v4.2M8 4.6v.1',
+  UNKNOWN: 'M6 6.2a2 2 0 1 1 2 2.4v.9M8 11.4v.1',
+  'N/A': 'M4.8 8h6.4',
+}
+
 export function VerdictDot({ verdict, title, size = 16 }) {
   const v = verdictOf(verdict)
   const open = v.shape === 'open'
-  const glyph = size >= 72 ? 30 : size >= 24 ? 13 : size >= 16 ? 9 : 7
+  const d = MARK_PATH[verdict] || MARK_PATH.UNKNOWN
+  // stroke scales with the mark so a 56px medallion is not a hairline
+  const w = size >= 48 ? 1.6 : size >= 24 ? 1.9 : 2.1
   return (
     <span
       role="img"
       aria-label={title || v.label}
       title={title || v.label}
-      className={`vshape vshape-${v.shape} inline-flex flex-none items-center justify-center font-bold leading-none`}
+      className={`vshape vshape-${v.shape} inline-flex flex-none items-center justify-center`}
       style={{
-        width: size, height: size, fontSize: glyph,
-        // in dark the fills are light hues, so a white glyph would vanish;
-        // --color-on-status flips with the theme
+        width: size, height: size,
         background: open ? 'transparent' : v.mark,
         color: open ? v.fg : 'var(--color-on-status)',
-        borderWidth: open ? (size >= 72 ? 3 : 1.5) : 0,
+        borderWidth: open ? (size >= 48 ? 2 : 1.5) : 0,
       }}
     >
-      <span aria-hidden="true">{v.glyph}</span>
+      <svg viewBox="0 0 16 16" width="100%" height="100%" fill="none" stroke="currentColor"
+           strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={d} />
+      </svg>
     </span>
   )
 }

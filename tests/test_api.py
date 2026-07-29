@@ -255,12 +255,19 @@ def test_a_missing_asset_404s_rather_than_returning_the_app_shell():
         srv.shutdown()
 
 
-def test_the_server_rendered_pages_remain_available_as_a_fallback():
+def test_the_data_layer_answers_without_a_bundler():
     """The no-build path still works, so the package is usable straight from a
-    wheel without running a bundler."""
+    wheel without running a bundler.
+
+    There is no server-rendered copy of the dashboard any more, so what has to
+    hold is that the data layer answers without one: the cohort endpoint serves,
+    and the upload console renders."""
     srv, base, subs = _serve()
     try:
-        body = urllib.request.urlopen(base + "/legacy/").read().decode()
-        assert "Batch overview" in body
+        import json as _json
+        cohort = _json.loads(urllib.request.urlopen(base + "/api/cohort").read())
+        assert cohort["total"] == len(subs)
+        body = urllib.request.urlopen(base + "/upload").read().decode()
+        assert '<div id="root">' in body or "<form" in body
     finally:
         srv.shutdown()

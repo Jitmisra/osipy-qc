@@ -320,9 +320,9 @@ body {
 .vshape        { display:inline-flex; align-items:center; justify-content:center; }
 .vshape-circle { border-radius: var(--radius-pill); }
 .vshape-diamond{ border-radius: 3px; transform: rotate(45deg); }
-.vshape-diamond > * { transform: rotate(-45deg); }
+.vshape-diamond > svg { transform: rotate(-45deg); }
 .vshape-square { border-radius: 30%; }
-.vshape-open   { border-radius: var(--radius-pill);
+.vshape-open   { border-radius: var(--radius-pill); border-style: solid;
                  border: 1.5px dashed currentColor; background: transparent !important; }
 
 /* ---- 9. FOCUS — one rule, works over glass ------------------------------ */

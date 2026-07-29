@@ -64,10 +64,10 @@ function ThemeToggle() {
       onClick={() => setTheme(dark ? 'light' : 'dark')}
       aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
       title={dark ? 'Light theme' : 'Dark theme'}
-      className="h-8 w-8 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] p-0 text-[var(--color-muted)] transition-colors hover:text-[var(--color-ink)]"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-muted)] transition-colors hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-none" aria-hidden="true">
         {dark ? (
           <>
             <circle cx="12" cy="12" r="4" />
@@ -162,10 +162,13 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
               onClick={onOpenThresholds}
               className="inline-flex h-8 items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold transition-colors hover:border-[var(--color-line-strong)]"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+              {/* sliders, not a second sun: the theme toggle already owns that */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="2" strokeLinecap="round" className="flex-none" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+                <circle cx="9" cy="7" r="1.9" fill="currentColor" stroke="none" />
+                <circle cx="15" cy="12" r="1.9" fill="currentColor" stroke="none" />
+                <circle cx="7" cy="17" r="1.9" fill="currentColor" stroke="none" />
               </svg>
               Thresholds
             </button>

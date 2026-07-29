@@ -502,30 +502,13 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 self._redirect(_safe_back(query.get("back", ["/"])[0]))
                 return
 
-            # the built React app owns the UI when it is present; the
-            # server-rendered pages below stay as the no-build fallback
-            if not path.startswith("/legacy") and self._serve_spa(path):
+            # React owns the UI. There is no second, server-rendered copy of it
+            # to drift out of step; the only page rendered here is the upload
+            # console, which must work before any build exists.
+            if self._serve_spa(path):
                 return
 
-            if path.startswith("/legacy"):
-                path = path[len("/legacy"):] or "/"
-
-            if batch and path in ("/", "/index.html"):
-                from .dashboard_html import render_overview
-                subjects, summary, cfg = self._effective(batch)
-                self._send(render_overview(subjects, summary, cfg, batch["dataset"],
-                                           overrides=batch.get("overrides") or {}))
-            elif batch and path.startswith("/subject/"):
-                from .dashboard_html import render_subject
-                subjects, _summary, cfg = self._effective(batch)
-                sid = up.unquote(path[len("/subject/"):])
-                sub = next((s for s in subjects if s.sid == sid), None)
-                if sub is None:
-                    self._send(_error_page(404, f"No subject {sid!r} in this cohort."), 404)
-                else:
-                    self._send(render_subject(subjects, sub, cfg,
-                                              overrides=batch.get("overrides") or {}))
-            elif path in ("/", "/index.html", "/upload"):
+            if path in ("/", "/index.html", "/upload"):
                 self._send(_upload_page())
             else:
                 self._send(_error_page(404, "That page does not exist."), 404)

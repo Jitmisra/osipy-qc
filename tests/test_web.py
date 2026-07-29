@@ -125,13 +125,25 @@ def _serve():
 
 
 def test_get_serves_the_upload_page():
+    """/upload is answered.
+
+    When the React bundle is built it owns the route; the server-rendered
+    console below is the no-build fallback, so both are acceptable here and the
+    fallback itself is asserted directly in the next test."""
     srv, base = _serve()
     try:
-        body = urllib.request.urlopen(base + "/legacy/upload").read().decode()
-        assert "<form" in body and 'action="/run"' in body and 'method="post"' in body
-        assert 'name="cbf"' in body                 # the upload field is present
+        body = urllib.request.urlopen(base + "/upload").read().decode()
+        assert '<div id="root">' in body or "<form" in body
     finally:
         srv.shutdown()
+
+
+def test_the_no_build_upload_console_still_renders():
+    """The package must be usable straight from a wheel, with no bundler run."""
+    from osipy_qc.web import _upload_page
+    body = _upload_page()
+    assert "<form" in body and 'action="/run"' in body and 'method="post"' in body
+    assert 'name="cbf"' in body
 
 
 def test_unknown_path_is_404():
