@@ -178,12 +178,9 @@ export default function Subject({ cohort }) {
             <h2 className="text-[13px] font-semibold uppercase tracking-[0.09em] text-[var(--color-faint)]">
               Measured against expectation
             </h2>
-            <Link
-              to="/methodology"
-              className="font-mono text-[11px] text-[var(--color-accent-600)] hover:underline"
-            >
-              where these ranges come from →
-            </Link>
+            <span className="font-mono text-[11px] text-[var(--color-faint)]">
+              ranges and their sources: Thresholds, top right
+            </span>
           </div>
           <ul>
             {data.kpis.map((k) => {
@@ -295,10 +292,8 @@ export default function Subject({ cohort }) {
         A verdict marked <b>provisional</b> was decided by an <b>uncalibrated</b> cut-off — an
         engineering default with no published derivation. Under strict grading it can raise a
         failure; turn strict off and it becomes a warning instead. Checks marked <b>N/A</b> or{' '}
-        <b>INFO</b> are excluded from the overall verdict.{' '}
-        <Link to="/methodology" className="font-semibold text-[var(--color-accent-600)] underline">
-          See where every threshold comes from →
-        </Link>
+        <b>INFO</b> are excluded from the overall verdict. Every threshold, with the source it
+        came from, is listed under <b>Thresholds</b>.
       </Card>
 
       <Lightbox src={zoom?.src} alt={zoom?.alt} onClose={() => setZoom(null)} />

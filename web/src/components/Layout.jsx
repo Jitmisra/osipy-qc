@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useParams } from 'react-router-dom'
-import { VerdictDot } from '../lib/ui.jsx'
+import { Link, NavLink, useParams } from 'react-router-dom'
+import { Button, VerdictDot } from '../lib/ui.jsx'
 
 function Logo() {
   return (
@@ -100,8 +100,6 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
 
         <nav className="flex flex-col gap-0.5 p-2.5">
           <NavItem to="/" d={Icon.grid} end>Overview</NavItem>
-          <NavItem to="/methodology" d={Icon.book}>Methodology</NavItem>
-          <NavItem to="/upload" d={Icon.plus}>Grade a new scan</NavItem>
         </nav>
 
         {subjects.length > 0 && (
@@ -169,6 +167,15 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
               Thresholds
             </button>
           )}
+          {/* the one thing that creates something: primary, and last, so it is
+              where the eye lands after reading the bar left to right */}
+          <Button as={Link} to="/upload" variant="primary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              <path d={Icon.plus} />
+            </svg>
+            Grade a new scan
+          </Button>
         </header>
         <main className="mx-auto w-full max-w-[1500px] flex-1 px-5 pb-16 pt-6">{children}</main>
       </div>

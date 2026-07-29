@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, Button, VerdictPill, EmptyState, VerdictBar, BandMeter, verdictOf } from '../lib/ui.jsx'
-import { QeiStrip, CheckMatrix } from '../components/charts.jsx'
 
 /** Sortable column header. Re-sorting is the reviewer's main way to re-triage. */
 function Th({ id, sort, setSort, children, className = '' }) {
@@ -272,13 +271,6 @@ export default function Overview({ cohort, onOpenThresholds }) {
             </table>
           </div>
         </Card>
-
-        <div className={wide ? 'col-span-12' : 'col-span-12 xl:col-span-7'}>
-          <QeiStrip subjects={cohort.subjects} cutoff={cohort.qeiCutoff} />
-        </div>
-        <div className={wide ? 'col-span-12' : 'col-span-12 xl:col-span-5'}>
-          <CheckMatrix matrix={cohort.matrix} subjects={cohort.subjects} total={cohort.total} />
-        </div>
       </div>
     </>
   )

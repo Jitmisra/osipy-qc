@@ -8,7 +8,6 @@ import Layout from './components/Layout.jsx'
 import ThresholdPanel from './components/ThresholdPanel.jsx'
 import Overview from './pages/Overview.jsx'
 import Subject from './pages/Subject.jsx'
-import Methodology from './pages/Methodology.jsx'
 import Upload from './pages/Upload.jsx'
 import { OverviewSkeleton, ErrorNote, EmptyState } from './lib/ui.jsx'
 
@@ -43,7 +42,6 @@ function App() {
           }
         />
         <Route path="/subject/:sid" element={<Subject cohort={cohort} />} />
-        <Route path="/methodology" element={<Methodology />} />
         <Route path="/upload" element={<Upload />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
