@@ -54,10 +54,18 @@ _REPORT_CSS = """
   background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden;
   overflow:hidden;border:1px solid var(--line)}
 .hero .eyebrow{opacity:.9}
-.newscan{position:absolute;top:1.1rem;right:1.2rem;font-size:.82rem;font-weight:600;
-  color:var(--accent-fill);background:var(--surface);border:1px solid var(--line);
-  border-radius:100px;padding:.4rem .85rem;text-decoration:none}
-.newscan:hover{border-color:var(--accent);text-decoration:none}
+/* A real target: 40px tall, readable at 15px, and above the hero's spine and
+   any stacking the surrounding cards create. It was 13px in a 28px pill, which
+   is below the size anything should be asked to hit. */
+.newscan{position:absolute;top:1rem;right:1.1rem;z-index:2;
+  display:inline-flex;align-items:center;gap:.4rem;min-height:40px;
+  font-size:.95rem;font-weight:600;line-height:1;
+  color:#fff;background:var(--accent-fill);border:1px solid transparent;
+  border-radius:100px;padding:0 1.1rem;text-decoration:none;
+  box-shadow:0 1px 2px rgba(16,24,40,.16)}
+.newscan:hover{background:var(--accent-600);text-decoration:none}
+.newscan:active{transform:translateY(1px)}
+@media (max-width:640px){.newscan{position:static;margin-bottom:.9rem}}
 @media print{.newscan{display:none}}
 .hero::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--hero-fg,var(--accent))}
 .hero h1{font-size:clamp(1.8rem,4vw,2.5rem);margin:.35rem 0 .3rem;font-weight:700}
