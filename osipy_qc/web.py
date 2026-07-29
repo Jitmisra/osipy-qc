@@ -134,7 +134,7 @@ def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
         f'<div class="ic">{_FILE_IC}</div>'
         f'<div class="txt"><b>{esc(title)}</b><small data-hint>{esc(hint)}</small></div>'
         f'<button type="button" class="clear" aria-label="remove">clear</button>'
-        f'<input type="file" name="{field}" accept=".nii,.gz"{req}></div>'
+        f'<input type="file" name="{field}" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"{req}></div>'
     )
 
 
@@ -178,11 +178,14 @@ def _upload_page(error: str = "") -> str:
     <div class="field-label">Raw acquisition
       <span class="opt">optional &mdash; unlocks the schema, M0, motion and data-type checks</span></div>
     <label class="drop dropall" for="files">
-      <input id="files" name="files" type="file" accept=".nii,.nii.gz" multiple hidden>
+      <input id="files" name="files" type="file" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream" multiple hidden>
+      <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
       <div class="txt"><b>Drop the raw files here</b>
         <small>The ASL series, M0 and structural together &mdash; each is recognised by its
-        filename, so keep them as the scanner named them.</small></div>
+        filename, so keep them as the scanner named them.
+        <br><a href="#" id="pickdir">Or choose a whole scan folder</a> &mdash; its NIfTIs are
+        found for you, and anything else is ignored.</small></div>
       <div class="picked" id="picked"></div>
     </label>
 
@@ -235,22 +238,39 @@ def _upload_page(error: str = "") -> str:
     if(/mprage|t1|anat|struct/.test(n))               return 'structural';
     return 'not recognised';
   }}
-  function show(){{
+  function show(src){{
     picked.innerHTML = '';
-    for(var i=0;i<multi.files.length;i++){{
-      var f = multi.files[i], s = document.createElement('span');
+    for(var i=0;i<src.files.length;i++){{
+      var f = src.files[i], s = document.createElement('span');
       s.innerHTML = '<span>'+f.name+'</span><b>'+role(f.name)+'</b>';
       picked.appendChild(s);
     }}
   }}
-  multi.addEventListener('change', show);
+  var folder = document.getElementById('folder');
+  var pickdir = document.getElementById('pickdir');
+  pickdir.addEventListener('click', function(ev){{
+    ev.preventDefault(); ev.stopPropagation(); folder.click();
+  }});
+  // a folder carries everything in it, so only the NIfTIs are kept
+  folder.addEventListener('change', function(){{
+    var keep = [];
+    for(var i=0;i<folder.files.length;i++){{
+      var n = folder.files[i].name.toLowerCase();
+      if(n.endsWith('.nii') || n.endsWith('.nii.gz')) keep.push(folder.files[i]);
+    }}
+    var dt = new DataTransfer();
+    keep.forEach(function(f){{ dt.items.add(f); }});
+    folder.files = dt.files;
+    show(folder);
+  }});
+  multi.addEventListener('change', function(){{ show(multi); }});
   ['dragenter','dragover'].forEach(function(e){{
     zone.addEventListener(e, function(ev){{ ev.preventDefault(); zone.classList.add('over'); }});
   }});
   ['dragleave','drop'].forEach(function(e){{
     zone.addEventListener(e, function(ev){{ ev.preventDefault(); zone.classList.remove('over'); }});
   }});
-  zone.addEventListener('drop', function(ev){{ multi.files = ev.dataTransfer.files; show(); }});
+  zone.addEventListener('drop', function(ev){{ multi.files = ev.dataTransfer.files; show(multi); }});
 
   form.addEventListener('submit', function(ev){{
     if(!window.fetch){{ return; }}
