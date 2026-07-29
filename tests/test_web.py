@@ -11,6 +11,7 @@ import gzip
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import numpy as np
@@ -170,7 +171,8 @@ def test_upload_with_no_file_shows_an_error_and_keeps_serving():
             urllib.request.urlopen(req)
         except urllib.error.HTTPError as e:
             assert e.code == 400
-            assert b"Could not grade" in e.read()
+            import json as _json
+            assert "error" in _json.loads(e.read())
         else:
             raise AssertionError("expected 400")
         # still alive
@@ -204,11 +206,21 @@ def test_end_to_end_upload_produces_a_report(tmp_path):
         req = urllib.request.Request(
             base + "/run", data=body,
             headers={"Content-Type": "multipart/form-data; boundary=B"})
-        html = urllib.request.urlopen(req).read().decode()
-        assert html.startswith("<!DOCTYPE html>")
-        assert "1.qei" in html                       # the QEI actually ran
-        assert "data:image/png;base64," in html      # images rendered
-        assert "<svg" in html                        # the histogram
+        import json as _json
+        res = urllib.request.urlopen(req)
+        assert res.headers.get("Content-Type", "").startswith("application/json")
+        data = _json.loads(res.read())
+        # the same payload a cohort scan returns, so React renders it with the
+        # same components instead of receiving a foreign HTML document
+        assert data["verdict"] in ("PASS", "WARN", "FAIL", "UNKNOWN")
+        assert any(c["id"] == "1.qei" for c in data["checks"])   # the QEI ran
+        assert data["kpis"], "headline metrics are present"
+        assert data["figures"], "figures survive an upload"
+        # and a figure actually renders from the retained arrays
+        fig = data["figures"][0]
+        url = base + f"/api/subject/{urllib.parse.quote(data['sid'])}/figure/{fig['name']}.png"
+        img = urllib.request.urlopen(url)
+        assert img.status == 200 and int(img.headers["Content-Length"]) > 500
     finally:
         srv.shutdown()
 

@@ -15,7 +15,8 @@ How, without dependencies
 Built on `http.server` + `email` from the standard library, so the package stays
 numpy + nibabel only — no Flask, no FastAPI, no build step, no node_modules. The
 page is served as a single self-contained string; the report it returns is the
-same `report_html.render_html` the CLI writes.
+The self-contained HTML report is written by `osipy-qc --html`; this
+server answers JSON and lets React render it.
 
 Scope, honestly
 ---------------
@@ -40,7 +41,6 @@ import webbrowser
 from ._webassets import BASE_CSS, brand, esc
 from .core.config import POPULATIONS, for_population
 from .report import run_qc
-from .report_html import render_html
 
 # Refuse absurd uploads outright rather than trying to parse them.
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024      # 512 MB across all files in one request
@@ -255,8 +255,26 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, byt
     return out
 
 
-def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> str:
-    """Write the uploaded NIfTIs to a temp dir, grade them, render the report."""
+# The last few graded uploads, kept so their figures can be rendered on demand.
+# Bounded on purpose: the arrays are large and this is a single-process server.
+_UPLOADS: dict[str, object] = {}
+_UPLOAD_KEEP = 4
+
+
+def _remember_upload(subject) -> None:
+    _UPLOADS[subject.sid] = subject
+    while len(_UPLOADS) > _UPLOAD_KEEP:
+        _UPLOADS.pop(next(iter(_UPLOADS)))
+
+
+def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
+    """Write the uploaded NIfTIs to a temp dir, grade them, return the payload.
+
+    Returns the same JSON shape as /api/subject/<id>, so the React report page
+    renders an upload with exactly the components it uses for a cohort scan.
+    The self-contained HTML report still exists — it is what `osipy-qc --html`
+    writes — but it is no longer what the browser gets back from an upload.
+    """
     from .io import load_cbf_inputs
 
     cbf_name, cbf_bytes = fields.get("cbf", ("", b""))
@@ -282,8 +300,17 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> str:
         inputs = load_cbf_inputs(paths["cbf"], gm=paths["gm"], wm=paths["wm"],
                                  csf=paths["csf"])
         report = run_qc(inputs, cfg=cfg)
-        title = f"ASL QC report — {os.path.basename(cbf_name) or 'uploaded scan'}"
-        return render_html(report, inputs=inputs, cfg=cfg, title=title)
+
+        from .api import subject_payload
+        from .batch import Subject
+        sid = os.path.basename(cbf_name) or "uploaded scan"
+        subject = Subject(sid=sid, report=report, inputs=inputs, cfg=cfg)
+        # hold the graded arrays briefly so /figure/ can render from them; the
+        # temp dir is gone by then, but the loaded arrays are not
+        _remember_upload(subject)
+        payload = subject_payload(subject)
+        payload["uploaded"] = True
+        return payload
 
 
 def _safe_back(raw: str) -> str:
@@ -417,6 +444,26 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(apimod.checks_catalogue())
             return True
 
+        # A graded upload is addressable whether or not a cohort is loaded — the
+        # upload console runs with no cohort at all, and its report still needs
+        # its figures.
+        if path.startswith("/api/subject/") and _UPLOADS:
+            import urllib.parse as up
+            rest = up.unquote(path[len("/api/subject/"):])
+            sid, _, fig = rest.partition("/figure/")
+            sub = _UPLOADS.get(sid if fig else rest)
+            if sub is not None:
+                if fig:
+                    try:
+                        raw, ctype = apimod.figure_bytes(sub, fig.rsplit(".", 1)[0])
+                    except KeyError:
+                        self._send_json({"error": f"unknown figure {fig}"}, 404)
+                        return True
+                    self._send_bytes(raw, ctype)
+                else:
+                    self._send_json(apimod.subject_payload(sub))
+                return True
+
         if batch is None:
             # single-scan mode: no cohort loaded
             if path.startswith("/api/"):
@@ -442,7 +489,7 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
             subjects, _summary, _cfg = self._effective(batch)
             if "/figure/" in rest:
                 sid, fig = rest.split("/figure/", 1)
-                sub = next((s for s in subjects if s.sid == sid), None)
+                sub = next((s for s in subjects if s.sid == sid), None) or _UPLOADS.get(sid)
                 if sub is None:
                     self._send_json({"error": f"unknown subject {sid}"}, 404)
                     return True
@@ -453,7 +500,7 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                     return True
                 self._send_bytes(raw, ctype)
                 return True
-            sub = next((s for s in subjects if s.sid == rest), None)
+            sub = next((s for s in subjects if s.sid == rest), None) or _UPLOADS.get(rest)
             if sub is None:
                 self._send_json({"error": f"unknown subject {rest}"}, 404)
                 return True
@@ -563,10 +610,10 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 )
             body = self.rfile.read(length)
             fields = _parse_multipart(body, self.headers.get("Content-Type", ""))
-            self._send(_grade_upload(fields))
+            self._send_json(_grade_upload(fields))
         except Exception as exc:                # a bad upload must not kill the server
             traceback.print_exc()
-            self._send(_upload_page(error=f"{type(exc).__name__}: {exc}"), 400)
+            self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
 
 
 class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { uploadScan } from '../lib/api.js'
 import { Card, SectionTitle, Button, ErrorNote } from '../lib/ui.jsx'
+import ScanReport from '../components/ScanReport.jsx'
 
 const FIELDS = [
   { name: 'cbf', label: 'CBF map', required: true, hint: 'The quantified perfusion map (.nii or .nii.gz).' },
@@ -55,6 +56,7 @@ export default function Upload() {
   const [population, setPopulation] = useState('adult')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [result, setResult] = useState(null)
   const formRef = useRef(null)
 
   async function submit(e) {
@@ -69,21 +71,35 @@ export default function Upload() {
       const fd = new FormData()
       FIELDS.forEach((f) => files[f.name] && fd.append(f.name, files[f.name]))
       fd.append('population', population)
-      const html = await uploadScan(fd)
-      // the server returns a complete, self-contained report page
-      const w = window.open('', '_blank')
-      if (w) {
-        w.document.write(html)
-        w.document.close()
-      } else {
-        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
-        window.location.href = url
-      }
+      // the server returns the same payload a cohort scan does, so the result
+      // is rendered here by the same components rather than dumped into a
+      // new window as a foreign HTML document
+      setResult(await uploadScan(fd))
     } catch (err) {
       setError(err)
     } finally {
       setBusy(false)
     }
+  }
+
+  if (result) {
+    return (
+      <>
+        <header className="mb-5 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[24px] font-semibold leading-none tracking-[-0.02em]">
+              Graded scan
+            </h1>
+            <p className="mt-2 font-mono text-[13px] text-[var(--color-muted)]">{result.sid}</p>
+          </div>
+          <div className="no-print flex gap-2">
+            <Button onClick={() => { setResult(null); setFiles({}) }}>Grade another</Button>
+            <Button variant="primary" onClick={() => window.print()}>Print / Save PDF</Button>
+          </div>
+        </header>
+        <ScanReport data={result} />
+      </>
+    )
   }
 
   return (
@@ -139,7 +155,7 @@ export default function Upload() {
               {busy ? 'Grading…' : 'Grade this scan'}
             </Button>
             <p className="text-center text-[11.5px] text-[var(--color-faint)]">
-              The report opens in a new tab and is a single self-contained file you can save or email.
+              The report appears here. Nothing leaves this machine, and Print / Save PDF gives you a copy to keep.
             </p>
           </form>
         </Card>
