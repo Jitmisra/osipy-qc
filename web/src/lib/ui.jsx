@@ -9,50 +9,71 @@ import { useEffect, useRef, useState } from 'react'
   in greyscale print and to colour-blind readers.
 */
 export const VERDICT = {
-  PASS: { glyph: '✓', label: 'Pass', fg: 'var(--color-pass)', tint: 'var(--color-pass-tint)' },
-  WARN: { glyph: '!', label: 'Warn', fg: 'var(--color-warn)', tint: 'var(--color-warn-tint)' },
-  FAIL: { glyph: '✕', label: 'Fail', fg: 'var(--color-fail)', tint: 'var(--color-fail-tint)' },
-  INFO: { glyph: 'i', label: 'Info', fg: 'var(--color-info)', tint: 'var(--color-info-tint)' },
-  UNKNOWN: { glyph: '?', label: 'Not run', fg: 'var(--color-none)', tint: 'var(--color-none-tint)' },
-  'N/A': { glyph: '–', label: 'N/A', fg: 'var(--color-none)', tint: 'var(--color-none-tint)' },
+  PASS: { glyph: '✓', label: 'Pass', fg: 'var(--color-pass)', mark: 'var(--color-pass-mark)', tint: 'var(--color-pass-tint)', shape: 'circle' },
+  WARN: { glyph: '!', label: 'Warn', fg: 'var(--color-warn)', mark: 'var(--color-warn-mark)', tint: 'var(--color-warn-tint)', shape: 'diamond' },
+  FAIL: { glyph: '✕', label: 'Fail', fg: 'var(--color-fail)', mark: 'var(--color-fail-mark)', tint: 'var(--color-fail-tint)', shape: 'square' },
+  INFO: { glyph: 'i', label: 'Info', fg: 'var(--color-info)', mark: 'var(--color-info-mark)', tint: 'var(--color-info-tint)', shape: 'open' },
+  UNKNOWN: { glyph: '?', label: 'Not run', fg: 'var(--color-none)', mark: 'var(--color-none-mark)', tint: 'var(--color-none-tint)', shape: 'open' },
+  'N/A': { glyph: '–', label: 'N/A', fg: 'var(--color-none)', mark: 'var(--color-none-mark)', tint: 'var(--color-none-tint)', shape: 'open' },
 }
 export const verdictOf = (v) => VERDICT[v] || VERDICT.UNKNOWN
 
 export function VerdictPill({ verdict, size = 'sm', className = '' }) {
   const v = verdictOf(verdict)
-  const pad = size === 'lg' ? 'px-3 py-1 text-sm' : 'px-2 py-0.5 text-[11px]'
+  const neutral = verdict === 'N/A' || verdict === 'UNKNOWN'
+  const pad = size === 'lg' ? 'px-3 h-7 text-[13px]' : 'px-2 h-[22px] text-[11px] tracking-[.01em]'
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full font-semibold tracking-wide ${pad} ${className}`}
-      style={{ color: v.fg, background: v.tint }}
+      className={`inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] font-semibold ${pad} ${className}`}
+      style={{
+        // the inset ring is what keeps the pill readable when a browser drops
+        // background colours in print
+        color: neutral ? 'var(--color-muted)' : v.fg,
+        background: v.tint,
+        boxShadow: 'inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)',
+      }}
     >
-      <span aria-hidden="true" className="font-bold leading-none">{v.glyph}</span>
+      <VerdictDot verdict={verdict} size={10} />
       {verdict}
     </span>
   )
 }
 
-export function VerdictDot({ verdict, title }) {
+/**
+ * The signature mark: a SHAPE as well as a colour.
+ *
+ * Pass is a circle, warn a diamond, fail a rounded square, and anything not run
+ * an open dashed ring. It reads at 8px, survives a greyscale photocopy, and
+ * scales unchanged up to the 72px hero medallion — so status never depends on
+ * hue alone.
+ */
+export function VerdictDot({ verdict, title, size = 16 }) {
   const v = verdictOf(verdict)
+  const open = v.shape === 'open'
+  const glyph = size >= 72 ? 30 : size >= 24 ? 13 : size >= 16 ? 9 : 7
   return (
     <span
       role="img"
       aria-label={title || v.label}
       title={title || v.label}
-      className="inline-flex h-4 w-4 flex-none items-center justify-center rounded-full text-[9px] font-bold text-white"
-      style={{ background: v.fg }}
+      className={`vshape vshape-${v.shape} inline-flex flex-none items-center justify-center font-bold leading-none`}
+      style={{
+        width: size, height: size, fontSize: glyph,
+        // in dark the fills are light hues, so a white glyph would vanish;
+        // --color-on-status flips with the theme
+        background: open ? 'transparent' : v.mark,
+        color: open ? v.fg : 'var(--color-on-status)',
+        borderWidth: open ? (size >= 72 ? 3 : 1.5) : 0,
+      }}
     >
       <span aria-hidden="true">{v.glyph}</span>
     </span>
   )
 }
 
-export function Card({ className = '', children, ...rest }) {
+export function Card({ className = '', interactive, children, ...rest }) {
   return (
-    <div
-      className={`rounded-[14px] border border-[var(--color-line)] bg-[var(--color-surface)] ${className}`}
-      {...rest}
-    >
+    <div className={`panel ${interactive ? 'panel--link' : ''} ${className}`} {...rest}>
       {children}
     </div>
   )
@@ -69,17 +90,23 @@ export function SectionTitle({ children, right }) {
   )
 }
 
-export function Button({ variant = 'ghost', className = '', as: As = 'button', ...rest }) {
+export function Button({ variant = 'ghost', size, className = '', as: As = 'button', ...rest }) {
   const base =
-    'inline-flex items-center justify-center gap-2 rounded-[10px] px-3.5 py-2 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+    'inline-flex items-center justify-center gap-2 rounded-[var(--radius-md)] px-3.5 h-9 text-[13.5px] font-semibold ' +
+    'transition-[background-color,border-color,color,box-shadow,transform] duration-[120ms] ease-[var(--ease-out)] ' +
+    'disabled:opacity-45 disabled:cursor-not-allowed active:scale-[.98]'
   const styles = {
-    primary:
-      'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-600)]',
-    ghost:
-      'border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink)] hover:border-[var(--color-faint)]',
-    quiet: 'text-[var(--color-muted)] hover:text-[var(--color-ink)]',
+    // the inset top highlight does the lifting; no gradient anywhere
+    primary: 'text-white bg-[var(--color-accent-fill,var(--color-accent))] hover:brightness-110 ' +
+             'shadow-[inset_0_1px_0_rgba(255,255,255,.28),0_1px_2px_rgba(20,26,48,.20)]',
+    ghost: 'border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-ink)] ' +
+           'shadow-[var(--shadow-e1)] hover:border-[var(--color-line-strong)] hover:shadow-[var(--shadow-e2)]',
+    // no border ring to fight the panel it sits inside
+    subtle: 'raised text-[var(--color-ink)] hover:brightness-[.97]',
+    quiet: 'text-[var(--color-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-well)]',
   }
-  return <As className={`${base} ${styles[variant]} ${className}`} {...rest} />
+  const sizes = { sm: 'h-8 px-3 text-[12.5px] rounded-[var(--radius-sm)]', lg: 'h-11 px-5 text-[15px] rounded-[14px]' }
+  return <As className={`${base} ${styles[variant]} ${sizes[size] || ''} ${className}`} {...rest} />
 }
 
 /** A hero number with a caption; used where a chart would be overkill. */
@@ -144,7 +171,7 @@ export function Lightbox({ src, alt, onClose }) {
       role="dialog"
       aria-label={alt}
       onClick={onClose}
-      className="fixed inset-0 z-50 grid cursor-zoom-out place-items-center bg-black/85 p-6 backdrop-blur-sm"
+      className="scrim scrim--lightbox fixed inset-0 z-50 grid cursor-zoom-out place-items-center p-6"
     >
       <img
         src={src}

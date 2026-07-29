@@ -32,9 +32,9 @@ function NavItem({ to, d, children, end }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-sm font-medium transition-colors ${
+        `relative flex h-9 items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 text-[13.5px] font-semibold transition-colors ${
           isActive
-            ? 'bg-[var(--color-accent-050)] text-[var(--color-accent-600)]'
+            ? 'bg-[var(--color-accent-050)] text-[var(--color-accent-600)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-[var(--color-accent)]'
             : 'text-[var(--color-ink)] hover:bg-[var(--color-well)]'
         }`
       }
@@ -64,7 +64,7 @@ function ThemeToggle() {
       onClick={() => setTheme(dark ? 'light' : 'dark')}
       aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
       title={dark ? 'Light theme' : 'Dark theme'}
-      className="rounded-[9px] border border-[var(--color-line)] p-2 text-[var(--color-muted)] transition-colors hover:text-[var(--color-ink)]"
+      className="h-8 w-8 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] p-0 text-[var(--color-muted)] transition-colors hover:text-[var(--color-ink)]"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -87,8 +87,8 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="no-print sticky top-0 hidden h-screen w-[236px] flex-none flex-col overflow-y-auto border-r border-[var(--color-line)] bg-[var(--color-surface)] md:flex">
-        <div className="flex items-center gap-2.5 border-b border-[var(--color-line)] px-4 py-4">
+      <aside className="no-print glass-chrome sticky top-3 ml-2 hidden sm:ml-3 h-[calc(100vh-24px)] w-[248px] flex-none flex-col overflow-y-auto rounded-[var(--radius-pane)] md:flex">
+        <div className="flex items-center gap-2.5 px-4 py-4">
           <Logo />
           <span className="flex flex-col leading-tight">
             <b className="text-[15px] font-bold tracking-wide">OSIPI</b>
@@ -97,6 +97,8 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
             </small>
           </span>
         </div>
+
+        <div className="rule-h mx-3" />
 
         <nav className="flex flex-col gap-0.5 p-2.5">
           <NavItem to="/" d={Icon.grid} end>Overview</NavItem>
@@ -116,7 +118,7 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
                 to={`/subject/${encodeURIComponent(s.sid)}`}
                 title={`${s.sid} — ${s.verdict}${s.qei != null ? ` · QEI ${s.qei.toFixed(2)}` : ''}`}
                 className={({ isActive }) =>
-                  `flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-[13px] transition-colors ${
+                  `flex h-8 items-center gap-2 rounded-[var(--radius-sm)] px-2.5 font-mono text-[12.5px] transition-colors ${
                     isActive
                       ? 'bg-[var(--color-accent-050)] font-semibold text-[var(--color-accent-600)]'
                       : 'text-[var(--color-muted)] hover:bg-[var(--color-well)] hover:text-[var(--color-ink)]'
@@ -136,8 +138,8 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-[var(--color-line)] bg-[color-mix(in_srgb,var(--color-paper)_92%,transparent)] px-5 py-3 backdrop-blur">
-          <span className="font-bold tracking-tight text-[var(--color-accent)]">QC-ToolBox</span>
+        <header className="no-print glass-chrome sticky top-3 z-30 mx-2 mt-2 flex h-14 min-w-0 sm:mx-3 sm:mt-3 items-center gap-2 rounded-[var(--radius-pane)] px-3 sm:gap-3 sm:px-4">
+          <span className="hidden flex-none font-bold tracking-[-.01em] text-[var(--color-accent)] sm:inline">QC-ToolBox</span>
           {cohort && (
             <>
               <Chip>🧠 {cap(cohort.organ)}</Chip>
@@ -151,13 +153,14 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
               )}
             </>
           )}
-          <div className="flex-1" />
+          <div className="min-w-0 flex-1" />
+          <div className="flex flex-none items-center gap-2">
           <ThemeToggle />
           {cohort && (
             <button
               type="button"
               onClick={onOpenThresholds}
-              className="inline-flex items-center gap-2 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-sm font-semibold transition-colors hover:border-[var(--color-faint)]"
+              className="inline-flex h-8 items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-[12.5px] font-semibold transition-colors hover:border-[var(--color-line-strong)]"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -176,8 +179,9 @@ export default function Layout({ cohort, onOpenThresholds, children }) {
             </svg>
             Grade a new scan
           </Button>
+          </div>
         </header>
-        <main className="mx-auto w-full max-w-[1500px] flex-1 px-5 pb-16 pt-6">{children}</main>
+        <main className="mx-auto w-full max-w-[1560px] flex-1 px-6 pb-20 pt-6">{children}</main>
       </div>
     </div>
   )
@@ -189,10 +193,10 @@ function Chip({ children, accent, title }) {
   return (
     <span
       title={title}
-      className={`hidden whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[11px] sm:inline ${
+      className={`hidden h-7 flex-none items-center whitespace-nowrap rounded-[var(--radius-pill)] px-2.5 font-mono text-[11px] lg:inline-flex ${
         accent
-          ? 'border-[var(--color-accent)]/40 bg-[var(--color-accent-050)] text-[var(--color-accent-600)]'
-          : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-muted)]'
+          ? 'bg-[var(--color-accent-050)] text-[var(--color-accent-600)]'
+          : 'raised text-[var(--color-muted)]'
       }`}
     >
       {children}

@@ -1,140 +1,479 @@
+/* ============================================================================
+   src/index.css — TOKENS.  Replaces lines 1–66 and the @theme at 116–125.
+   Every token that exists today still exists. New tokens are additive.
+   ========================================================================= */
 @import "tailwindcss";
 
-/*
-  Design tokens. The brand palette follows the OSIPI QC-ToolBox proposal (warm
-  paper, terracotta accent). The verdict colours are a *status* palette, kept
-  separate from any decorative hue and validated for colour-vision deficiency;
-  every verdict also carries a glyph and a text label, so status is never
-  conveyed by colour alone.
-*/
 @theme {
-  --color-paper: #faf8f5;
-  --color-surface: #ffffff;
-  --color-well: #f2ede6;
-  --color-line: #e6e0d9;
-  --color-ink: #1b1a19;
-  --color-muted: #6c6660;
-  --color-faint: #98918a;
+  /* ---- surfaces (light) ------------------------------------------------ */
+  --color-paper:      #f4f6fb;  /* ground base + row-hover + field fill      */
+  --color-surface:    #ffffff;  /* .panel — every opaque data surface        */
+  --color-well:       #eef1f8;  /* .raised — nested blocks, theads, drawers  */
+  --color-track:      #e4e9f3;  /* .well  — meter tracks, inputs (NEW)       */
+  --color-line:       #e2e6ef;
+  --color-line-strong:#ccd3e0;  /* NEW: hover borders, sort arrows           */
+  --color-ink:        #101319;
+  --color-muted:      #5a6172;
+  --color-faint:      #646b7d;
 
-  --color-accent: #ac4d2a;
-  --color-accent-600: #8d3d1f;
-  --color-accent-050: #fbeee6;
+  /* ---- accent: ONE flat violet. No gradient anywhere in the UI. -------- */
+  --color-accent:     #6d34d6;  /* fill + link + focus ring                  */
+  --color-accent-600: #5a25bd;  /* pressed / hover fill                      */
+  --color-accent-050: #f0eafd;  /* selected nav row, footnote panel          */
+  --color-on-accent:  #ffffff;
+  --color-on-status:  #ffffff;  /* glyph colour inside a filled status dot   */
 
-  --color-pass: #0b8a6b;
-  --color-warn: #b8820a;
-  --color-fail: #b01030;
-  --color-info: #2563c9;
-  --color-none: #78716c;
+  /* ---- status: -ink is TEXT, -mark is FILLS, -tint is BACKGROUND ------- */
+  --color-pass: #0b7050;  --color-pass-mark: #0d8a6b;  --color-pass-tint: #dcf0e7;
+  --color-warn: #8a5b04;  --color-warn-mark: #ad7606;  --color-warn-tint: #f8ecd2;
+  --color-fail: #b0102f;  --color-fail-mark: #d81f45;  --color-fail-tint: #fbe1e7;
+  --color-info: #1f5fd0;  --color-info-mark: #2b71d8;  --color-info-tint: #e3ecfb;
+  --color-none: #666b78;  --color-none-mark: #787e8f;  --color-none-tint: #e9ebf0;
 
-  --color-pass-tint: #e3f4ee;
-  --color-warn-tint: #fbf0d6;
-  --color-fail-tint: #fce4e8;
-  --color-info-tint: #e6eefb;
-  --color-none-tint: #eeebe7;
+  --color-plate: #0b0a09;       /* figure PNG mat — identical in both themes */
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* ---- type: Inter is dropped. It never loads; naming it first was a lie. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono",
+               "Segoe UI Mono", Consolas, monospace;
 
-  --radius-card: 14px;
+  /* ---- radii: child = parent − padding, so corners stay concentric ----- */
+  --radius-xs:    6px;   /* tags, checkbox, provisional chip                */
+  --radius-sm:   10px;   /* inputs, small buttons, row-hover fill           */
+  --radius-md:   12px;   /* buttons, nav rows, chips                        */
+  --radius-lg:   16px;   /* nested raised blocks, figure plate, drawer      */
+  --radius-card: 20px;   /* KEPT TOKEN — check cards, figure cards, tiles   */
+  --radius-pane: 26px;   /* panes: cohort band, ledger, KPI, sidebar, bar   */
+  --radius-hero: 30px;   /* verdict hero, slide-over, lightbox frame        */
+  --radius-pill: 999px;
+
+  /* ---- depth: contact shadow + ambient shadow, never one blur ---------- */
+  --shadow-e1: 0 1px 1px rgba(20,26,48,.04), 0 8px 24px -12px rgba(20,26,48,.16);
+  --shadow-e2: 0 2px 4px rgba(20,26,48,.05), 0 18px 44px -20px rgba(20,26,48,.24);
+  --shadow-e3: 0 8px 16px rgba(20,26,48,.10), 0 40px 90px -30px rgba(20,26,48,.42);
 }
 
-/* Dark mode is a deliberate second theme with its own steps, not an inversion. */
+/* Non-utility scalars live outside @theme: they are read by hand-written CSS. */
+:root {
+  --ground-1:    #e9ecfa;                       /* the single aurora radial  */
+  --edge-top:    inset 0 1px 0 rgba(255,255,255,.92);  /* specular top edge  */
+  --edge-ring:   inset 0 0 0 1px rgba(16,19,26,.045);
+  --blur-chrome: 30px;  --sat-chrome: 180%;
+  --blur-overlay:44px;  --sat-overlay:190%;
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 240ms; --dur-overlay: 320ms;
+  --ease-out:   cubic-bezier(.22,1,.36,1);
+  --ease-inout: cubic-bezier(.65,0,.35,1);
+}
+
+/* ============================================================================
+   DARK — a designed second theme, not an inversion.
+   ========================================================================= */
 :root[data-theme="dark"] {
-  --color-paper: #131211;
-  --color-surface: #1c1a19;
-  --color-well: #262322;
-  --color-line: #322e2c;
-  --color-ink: #f2eee9;
-  --color-muted: #a9a29b;
-  --color-faint: #7d766f;
+  --color-paper:      #0b0d14;
+  --color-surface:    #171a22;
+  --color-well:       #212634;
+  --color-track:      #10131b;
+  --color-line:       #2b3140;
+  --color-line-strong:#3a4256;
+  --color-ink:        #eef1f7;
+  --color-muted:      #9aa3b4;
+  --color-faint:      #8e97aa;
 
-  --color-accent: #d9764e;
-  --color-accent-600: #e8906b;
-  --color-accent-050: #2c1d16;
+  --color-accent:     #b79cff;  /* TEXT/ink tier in dark                     */
+  --color-accent-600: #cbb6ff;
+  --color-accent-050: #241c3d;
+  --color-accent-fill:#6d3fd8;  /* dark primary BUTTON fill (white 6.26:1)   */
+  --color-on-accent:  #ffffff;
+  --color-on-status:  #0f1219;  /* dark glyph inside a light status dot      */
 
-  --color-pass: #2fae8b;
-  --color-warn: #d4a017;
-  --color-fail: #e05c74;
-  --color-info: #6699ee;
-  --color-none: #8a827a;
+  --color-pass: #45dcac;  --color-pass-mark: #35cd9e;  --color-pass-tint: #123027;
+  --color-warn: #f0bf4a;  --color-warn-mark: #e0ad33;  --color-warn-tint: #33280f;
+  --color-fail: #ff6d8d;  --color-fail-mark: #f45f83;  --color-fail-tint: #3a1a23;
+  --color-info: #7fb0ff;  --color-info-mark: #5b95f0;  --color-info-tint: #152540;
+  --color-none: #98a1b2;  --color-none-mark: #858da0;  --color-none-tint: #242833;
 
-  --color-pass-tint: #122b25;
-  --color-warn-tint: #2d2410;
-  --color-fail-tint: #331a20;
-  --color-info-tint: #16213a;
-  --color-none-tint: #24211f;
+  --ground-1:  #1a2138;
+  --edge-top:  inset 0 1px 0 rgba(255,255,255,.14);
+  --edge-ring: inset 0 0 0 1px rgba(255,255,255,.03);
+
+  --shadow-e1: 0 1px 1px rgba(0,0,0,.40), 0 8px 24px -12px rgba(0,0,0,.55);
+  --shadow-e2: 0 2px 4px rgba(0,0,0,.45), 0 18px 44px -20px rgba(0,0,0,.65);
+  --shadow-e3: 0 8px 16px rgba(0,0,0,.50), 0 40px 90px -30px rgba(0,0,0,.80);
 }
+/* light theme needs the fill alias too, so components can name one variable */
+:root { --color-accent-fill: var(--color-accent); }
 
+/* ============================================================================
+   THE CLAMP — the axiom every number below is derived from. DO NOT BREAK IT.
+   Light: no ground stop may fall below #dfe3ec (relative luminance .7668).
+   Dark : no ground stop may rise  above #232838 (relative luminance .0216).
+   Shipped stops, measured: light #e9ecfa (.8422) / #f4f6fb (.9211)
+                            dark  #1a2138 (.0159) / #0b0d14 (.0041)
+   Anyone adding or editing a stop re-runs the check before merging.
+
+   MEASURED RESULTS (every ink tier against every surface it may appear on —
+   surface / raised / track / paper / ground-stop / chrome-composite / overlay):
+     LIGHT  ink   18.60 16.45 15.27 17.20 15.80 16.32 17.52   min 15.27
+            muted  6.20  5.48  5.09  5.73  5.27  5.44  5.84   min  5.09
+            faint  5.33  4.71  4.38* 4.93  4.53  4.68  5.02   min  4.38*
+     DARK   ink   15.37 13.34 16.41 17.16 14.08 13.56 14.55   min 13.34
+            muted  6.85  5.94  7.31  7.65  6.27  6.04  6.48   min  5.94
+            faint  5.93  5.14  6.33  6.62  5.43  5.23  5.61   min  5.14
+   * the ONE sub-4.5 cell in the system. Hence the single enforceable rule:
+     .well (--color-track) is a TRACK / FIELD material and carries no faint-tier
+     text. Ink and muted only. Everywhere else faint clears 4.5:1.
+
+   Status text on its own tint (light): pass 5.12 warn 5.01 fail 5.75 info 4.90
+     none 4.47(pill uses --color-muted 5.48 on none-tint; the dot carries hue).
+   Status text on its own tint (dark):  pass 8.18 warn 8.45 fail 5.79 info 6.97
+     none 5.66.
+   White on a filled status dot (light): 6.09 / 5.87 / 7.09 / 5.82 / 5.33.
+   #0f1219 on a filled status dot (dark): 10.78 / 10.93 / 6.98 / 8.53 / 7.21.
+   Status -mark on the deepest track it can sit on: light 3.82 / 3.46 / 4.42 /
+     4.17 / 3.59 — all clear the 3:1 graphical-object floor; dark 7.46 / 7.33 /
+     4.89 / 5.03 / 3.87.
+   Accent: white on #6d34d6 = 6.75; #6d34d6 on surface 6.75, paper 6.24,
+     raised 5.97, chrome-composite 5.92, accent-050 5.75. Dark #b79cff on
+     surface 7.63, raised 6.62, chrome 6.73; white on #6d3fd8 = 6.26.
+   CHROME WORST CASE: alpha .94 over the near-black figure PNG (#0b0a09) →
+     #f0f0f0 light; over pure white → #22252c dark. Both are in the table above.
+     .90 was tried first and put faint at 4.22 — that is why the alpha is .94.
+   Colour-vision (Viénot deuteranope / protanope, min sRGB separation across
+     all ten pairs): light ink 38.0 / 40.0, light mark 35.0 / 37.0,
+     dark ink 45.3 / 49.5, dark mark 43.3 / 36.0. Every verdict additionally
+     carries a glyph, a word, and a SHAPE.
+   ========================================================================= */
+
+/* ============================================================================
+   src/index.css — MATERIALS.  Paste after the token blocks.
+   Blur exists in exactly THREE places: .glass-chrome (sidebar), .glass-chrome
+   (top bar), .glass-overlay (slide-over / lightbox / tooltip). Nothing else.
+   backdrop-filter is NEVER nested inside backdrop-filter.
+   ========================================================================= */
+
+/* ---- 0. GROUND ---------------------------------------------------------- */
+/* Painted on the root element, fixed-attachment. No extra DOM node, no
+   stacking context, nothing to z-index-fight. The user SEES it: the shell is
+   inset 12px and every gutter between opaque panes shows it. */
 html {
-  background: var(--color-paper);
+  background-color: var(--color-paper);
+  background-image: radial-gradient(118% 80% at 8% -14%,
+                    var(--ground-1) 0%, transparent 60%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color-scheme: light;
 }
 :root[data-theme="dark"] { color-scheme: dark; }
 
 body {
   margin: 0;
-  background: var(--color-paper);
+  background: transparent;      /* the root paints the ground */
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.5;
+  letter-spacing: -0.004em;
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.005em;
+}
+*, *::before, *::after { box-sizing: border-box; }
+::selection { background: var(--color-accent-050); color: var(--color-ink); }
+
+/* ---- 1. GLASS CHROME — sidebar + top bar. Real content scrolls beneath. -- */
+.glass-chrome {
+  background-color: rgba(255,255,255,.94);
+  /* the sheen is a BACKGROUND LAYER on the element itself, never a positioned
+     ::before — a pseudo-element paints above in-flow text and would wash the
+     title from 16:1 to ~2:1. This cannot. */
+  background-image: linear-gradient(160deg,
+                    rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 46%);
+  -webkit-backdrop-filter: blur(var(--blur-chrome)) saturate(var(--sat-chrome));
+          backdrop-filter: blur(var(--blur-chrome)) saturate(var(--sat-chrome));
+  border: 1px solid rgba(16,19,26,.07);
+  box-shadow: var(--edge-top),
+              inset 0 -1px 0 rgba(16,19,26,.035),
+              0 2px 4px rgba(20,26,48,.05),
+              0 18px 44px -20px rgba(20,26,48,.22);
+}
+:root[data-theme="dark"] .glass-chrome {
+  background-color: rgba(20,23,31,.94);
+  background-image: linear-gradient(160deg,
+                    rgba(255,255,255,.09) 0%, rgba(255,255,255,0) 46%);
+  border-color: rgba(255,255,255,.10);
+  box-shadow: var(--edge-top),
+              inset 0 -1px 0 rgba(0,0,0,.35),
+              0 0 0 1px rgba(255,255,255,.04),
+              0 2px 4px rgba(0,0,0,.45),
+              0 18px 44px -20px rgba(0,0,0,.60);
 }
 
-*, *::before, *::after { box-sizing: border-box; }
+/* ---- 2. PANEL — every data surface. OPAQUE. This is the whole argument. -- */
+.panel {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pane);
+  box-shadow: var(--edge-top), var(--shadow-e1);
+}
+/* In dark, a faint raking sheen is what makes an opaque pane read as lifted
+   glass; in light a white sheen on a white pane is invisible, so there is none. */
+:root[data-theme="dark"] .panel {
+  background-image: linear-gradient(163deg,
+                    rgba(255,255,255,.055) 0%, rgba(255,255,255,0) 45%);
+  border-color: rgba(255,255,255,.075);
+  box-shadow: var(--edge-top), var(--edge-ring), var(--shadow-e1);
+}
+.panel--card { border-radius: var(--radius-card); }
+.panel--hero { border-radius: var(--radius-hero); }
+.panel--link { transition: box-shadow var(--dur-base) var(--ease-out),
+                           border-color var(--dur-base) var(--ease-out),
+                           transform var(--dur-base) var(--ease-out); }
+.panel--link:hover {
+  transform: translateY(-1px);
+  border-color: var(--color-line-strong);
+  box-shadow: var(--edge-top), var(--shadow-e2);
+}
 
-::selection { background: var(--color-accent-050); }
+/* ---- 3. RAISED — opaque nested block. NO GLASS INSIDE GLASS. ------------ */
+/* sticky theads, hover fills, the measurements drawer, figure captions,
+   KPI meter surrounds, nav hover, chips. Carries every text tier. */
+.raised {
+  background: var(--color-well);
+  border: 1px solid rgba(16,19,26,.05);
+  border-radius: var(--radius-lg);
+  backdrop-filter: none;
+}
+:root[data-theme="dark"] .raised {
+  background: var(--color-well);
+  border-color: rgba(255,255,255,.06);
+}
 
+/* ---- 4. WELL — recessed track / field. Ink + muted text only. ----------- */
+.well {
+  background: var(--color-track);
+  border: 1px solid rgba(16,19,26,.05);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 2px rgba(16,19,26,.09),
+              inset 0 -1px 0 rgba(255,255,255,.55);
+  backdrop-filter: none;
+}
+:root[data-theme="dark"] .well {
+  border-color: rgba(255,255,255,.05);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.50),
+              inset 0 -1px 0 rgba(255,255,255,.05);
+}
+.well--track { border-radius: var(--radius-pill); border: 0; }
+.well:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 1px 2px rgba(16,19,26,.09),
+              0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+/* ---- 5. OVERLAY + SCRIM — the heaviest glass, always scrimmed. ---------- */
+/* The scrim is what makes the overlay's contrast knowable: it collapses an
+   arbitrary backdrop into a bounded field BEFORE the overlay composites.
+   Measured: light scrim over white → #acadb1, overlay .92 → #f8f8f9 (faint
+   5.02). Dark scrim over white → #737373, overlay .92 → #1c1f28 (faint 5.61). */
+.scrim {
+  position: fixed; inset: 0;
+  background: rgba(12,15,26,.34);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+}
+:root[data-theme="dark"] .scrim { background: rgba(0,0,0,.55); }
+.scrim--lightbox { background: rgba(8,10,16,.72); backdrop-filter: blur(10px); }
+
+.glass-overlay {
+  background-color: rgba(255,255,255,.92);
+  background-image: linear-gradient(160deg,
+                    rgba(255,255,255,.60) 0%, rgba(255,255,255,0) 40%);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(var(--sat-overlay));
+          backdrop-filter: blur(var(--blur-overlay)) saturate(var(--sat-overlay));
+  border: 1px solid rgba(16,19,26,.09);
+  box-shadow: var(--edge-top), var(--shadow-e3);
+}
+:root[data-theme="dark"] .glass-overlay {
+  background-color: rgba(20,24,33,.92);
+  background-image: linear-gradient(160deg,
+                    rgba(255,255,255,.08) 0%, rgba(255,255,255,0) 42%);
+  border-color: rgba(255,255,255,.12);
+  box-shadow: var(--edge-top), 0 0 0 1px rgba(255,255,255,.04), var(--shadow-e3);
+}
+/* "Glass frame, opaque contents": the slide-over's scrolling BODY is a .panel
+   sheet inset 10px, so provenance labels never sit on a moving backdrop. */
+
+/* ---- 6. RULES — dividers fade at both ends, so panes stay afloat -------- */
+.rule-h { height: 1px; border: 0; background: linear-gradient(90deg,
+          transparent, var(--color-line) 4%, var(--color-line) 96%, transparent); }
+.rule-v { width: 1px;  background: linear-gradient(180deg,
+          transparent, var(--color-line) 16%, var(--color-line) 84%, transparent); }
+
+/* ---- 7. THE SPINE — 3px verdict rail. The batch as a barcode. ----------- */
+.spine { --s: var(--color-none-mark); width: 3px; border-radius: var(--radius-pill);
+         background: var(--s); }
+.spine[data-provisional] {
+  background-image: repeating-linear-gradient(45deg,
+    var(--s) 0 4px, transparent 4px 8px);
+  background-color: transparent;
+}
+/* on a table cell the spine is an inset shadow, never a child element */
+.spine-cell { box-shadow: inset 3px 0 0 var(--s); }
+
+/* ---- 8. VERDICT SHAPE — the signature. 8px to 72px, and mono print. ----- */
+.vshape        { display:inline-flex; align-items:center; justify-content:center; }
+.vshape-circle { border-radius: var(--radius-pill); }
+.vshape-diamond{ border-radius: 3px; transform: rotate(45deg); }
+.vshape-diamond > * { transform: rotate(-45deg); }
+.vshape-square { border-radius: 30%; }
+.vshape-open   { border-radius: var(--radius-pill);
+                 border: 1.5px dashed currentColor; background: transparent !important; }
+
+/* ---- 9. FOCUS — one rule, works over glass ------------------------------ */
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: 4px;
 }
+/* no box-shadow halo: it would clobber the element's own elevation shadow.
+   #6d34d6 measures 5.92:1 against the worst chrome composite, #b79cff 6.73:1. */
 
-/* thin, unobtrusive scrollbars so dense tables stay calm */
-* { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb {
-  background: var(--color-line);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-
-/* the app chrome is for screen only; printing yields the report itself */
-@media print {
-  .no-print { display: none !important; }
-  body { background: #fff; }
-  main { padding: 0 !important; }
-}
-
-/* Elevation: a two-part shadow (contact + ambient) reads as real depth where a
-   single blurred shadow reads as a smudge. */
-@theme {
-  --shadow-e1: 0 1px 2px rgba(28,27,26,.05), 0 1px 1px rgba(28,27,26,.03);
-  --shadow-e2: 0 1px 2px rgba(28,27,26,.05), 0 8px 20px -8px rgba(28,27,26,.14);
-  --shadow-e3: 0 2px 6px rgba(28,27,26,.07), 0 24px 48px -20px rgba(28,27,26,.28);
-}
-:root[data-theme="dark"] {
-  --shadow-e1: 0 1px 2px rgba(0,0,0,.4);
-  --shadow-e2: 0 1px 2px rgba(0,0,0,.4), 0 8px 20px -8px rgba(0,0,0,.6);
-  --shadow-e3: 0 2px 6px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
-}
-
-/* Numbers are data: line them up and stop them wobbling as values change. */
+/* ---- 10. NUMERALS / SCROLLBARS ----------------------------------------- */
 .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+* { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--color-line-strong);
+  border-radius: var(--radius-pill); border: 3px solid transparent;
+  background-clip: content-box; }
 
+/* ---- 11. ESCAPE HATCHES — tokens only, zero component edits ------------- */
+/* Both fallbacks resolve to surfaces with STRICTLY HIGHER contrast than the
+   composites above, so degrading can only improve legibility. */
+@media (prefers-reduced-transparency: reduce) {
+  html { background-image: none; }
+  .glass-chrome, .glass-overlay {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    background-color: var(--color-surface) !important;
+    background-image: none !important;
+    border-color: var(--color-line) !important;
+  }
+  .scrim { backdrop-filter: none; background: rgba(12,15,26,.60); }
+  :root[data-theme="dark"] .scrim { background: rgba(0,0,0,.75); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-chrome, .glass-overlay {
+    background-color: var(--color-surface);
+    background-image: none;
+  }
+  .scrim { background: rgba(12,15,26,.60); }
+  :root[data-theme="dark"] .scrim { background: rgba(0,0,0,.75); }
+}
+
+/* ---- 12. SKELETON (kept, retuned) -------------------------------------- */
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 .skeleton { position: relative; overflow: hidden; background: var(--color-well); }
-.skeleton::after {
-  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
-  animation: shimmer 1.4s infinite;
-}
+.skeleton::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+  animation: shimmer 1.4s infinite; }
 :root[data-theme="dark"] .skeleton::after {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent); }
+
+/* Motion is opt-out, not opt-in. Everything below animates only if the reader
+   has not asked it to stop. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
-@media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
+
+/* ============================================================================
+   src/index.css — PRINT.  Replaces the four-line @media print block at 108–112.
+   Glass, blur and translucency do not print. Every material has one paper form.
+   ========================================================================= */
+@page { margin: 14mm; }
+
+@media print {
+  /* --- 1. FORCE THE LIGHT TOKEN SET. ---------------------------------------
+     Without this, printing from dark mode puts #eef1f7 ink on white paper at
+     about 1.1:1 — an invisible report. This is not optional. */
+  :root, :root[data-theme="dark"] {
+    --color-paper:  #ffffff;
+    --color-surface:#ffffff;
+    --color-well:   #f2f4f8;
+    --color-track:  #f2f4f8;
+    --color-line:   #c8ccd6;
+    --color-line-strong:#a9b0bd;
+    --color-ink:    #101319;
+    --color-muted:  #414857;
+    --color-faint:  #545b6a;
+    --color-accent: #5a25bd;  --color-accent-600:#5a25bd;
+    --color-accent-050:#f2edfc; --color-accent-fill:#5a25bd;
+    --color-on-status:#ffffff;
+    --color-pass:#0b7050; --color-pass-mark:#0b7050; --color-pass-tint:#ffffff;
+    --color-warn:#7a5004; --color-warn-mark:#7a5004; --color-warn-tint:#ffffff;
+    --color-fail:#a30f2c; --color-fail-mark:#a30f2c; --color-fail-tint:#ffffff;
+    --color-info:#1b55bd; --color-info-mark:#1b55bd; --color-info-tint:#ffffff;
+    --color-none:#4f5563; --color-none-mark:#4f5563; --color-none-tint:#ffffff;
+    --edge-top: none; --edge-ring: none;
+    --shadow-e1: none; --shadow-e2: none; --shadow-e3: none;
+    color-scheme: light;
+  }
+
+  /* --- 2. THE GROUND AND ALL CHROME GO --------------------------------- */
+  html { background: #fff !important; background-image: none !important; }
+  body { background: #fff !important; color: #101319 !important; }
+  .no-print, .glass-chrome, .scrim, .glass-overlay,
+  aside[role="dialog"], [role="tooltip"] { display: none !important; }
+  main { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+
+  /* --- 3. MATERIAL → PAPER --------------------------------------------- */
+  /* pane  → white card, 1px #c8ccd6 hairline, radius 8, no shadow, no blur */
+  .panel {
+    background: #fff !important; background-image: none !important;
+    border: 1px solid #c8ccd6 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  .panel--card, .panel--hero { border-radius: 8px !important; }
+  /* raised → the one printed fill, so nested blocks stay legible as blocks */
+  .raised {
+    background: #f2f4f8 !important;
+    border: 1px solid #dde2ea !important;
+    border-radius: 6px !important;
+  }
+  /* well  → outlined, not filled; a printer's grey track swallows the bar */
+  .well, .well--track {
+    background: #fff !important;
+    border: 1px solid #c8ccd6 !important;
+    box-shadow: none !important;
+  }
+  .rule-h, .rule-v { background: #c8ccd6 !important; }
+
+  /* --- 4. STATUS SURVIVES A DROPPED BACKGROUND ------------------------- */
+  /* Pills print OUTLINED with their glyph, their shape and their word. */
+  [data-verdict-pill] {
+    background: #fff !important;
+    box-shadow: inset 0 0 0 1px currentColor !important;
+    color: inherit;
+  }
+  /* Rails, spines, dots, meter fills and colour ramps keep their ink. */
+  .spine, .spine-cell, .vshape, [data-meter-fill], [data-ramp] {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  /* …and if the printer or the driver drops colour anyway, the rail still
+     encodes the verdict by PATTERN: */
+  .spine[data-v="PASS"] { border-left: 3px solid currentColor; }
+  .spine[data-v="WARN"] { border-left: 3px dashed currentColor; }
+  .spine[data-v="FAIL"] { border-left: 3px double currentColor; }
+  /* and by SHAPE, which is theme-, colour- and greyscale-independent:
+     PASS circle, WARN diamond, FAIL rounded-square, other = dashed ring. */
+
+  /* --- 5. PAGINATION ---------------------------------------------------- */
+  .panel, section, li, tr, figure { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; }
+  thead { display: table-header-group; }   /* the ledger head repeats per page */
+  a[href^="/"]::after { content: ""; }     /* no URL noise on internal links   */
+  img { max-width: 100% !important; }
+  /* the figure mat stays dark on purpose: a brain PNG on white paper is unreadable */
+  [data-plate] { background: #0b0a09 !important;
+                 -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

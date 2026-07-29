@@ -27,7 +27,7 @@ report.to_dict()              # the full per-check result`
 function Snippet({ title, code }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--color-accent-600)]">
           {title}
@@ -96,8 +96,8 @@ export default function Upload() {
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
-        <Card className="p-5">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <Card className="min-w-0 p-5">
           <SectionTitle>Upload</SectionTitle>
           <form ref={formRef} onSubmit={submit} className="flex flex-col gap-3">
             {FIELDS.map((f) => (
@@ -144,7 +144,7 @@ export default function Upload() {
           </form>
         </Card>
 
-        <Card className="p-5">
+        <Card className="min-w-0 p-5">
           <SectionTitle>Or run it from your own code</SectionTitle>
           <p className="-mt-1 mb-3 text-xs text-[var(--color-muted)]">
             The library is pure NumPy and nibabel: no framework, no build step.
