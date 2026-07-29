@@ -101,6 +101,10 @@ figcaption{font-size:.78rem;color:var(--muted);padding:.6rem .8rem;border-top:1p
 .drivers .dchip .dot{width:7px;height:7px;border-radius:50%;flex:none}
 
 /* check cards */
+.card.check .head{display:flex;align-items:baseline;gap:.45rem;flex-wrap:wrap}
+.bignum{margin-left:auto;font-size:1.55rem;font-weight:650;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap}
+.bignum small{font-size:.62rem;font-weight:500;color:var(--muted);margin-left:.18rem}
 .checks{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
 .check{display:grid;grid-template-columns:5px 1fr;overflow:hidden;scroll-margin-top:80px}
 .check .rail{width:5px}
@@ -390,6 +394,36 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
 # --------------------------------------------------------------------------- #
 # check cards
 # --------------------------------------------------------------------------- #
+# The one number a check produced that is worth reading first, with its unit.
+# Same order and same formatting as the React tiles, so a printed report and the
+# screen agree on what the headline is.
+_HEADLINE: tuple[tuple[str, str], ...] = (
+    ("qei", ""), ("sCoV_pct", "%"), ("spatial_snr", ""), ("gm_wm_ratio", ""),
+    ("mean_gm_cbf", "mL/100g/min"), ("gm_coverage", "%"), ("negGM_fraction", ""),
+    ("dice", ""), ("mean_fwd_mm", "mm"), ("skewness", ""),
+)
+
+
+def _headline(metric: dict) -> tuple[str, str] | None:
+    for key, unit in _HEADLINE:
+        v = metric.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        shown = v * 100 if key == "gm_coverage" else float(v)
+        if abs(shown) >= 100:
+            text = f"{round(shown):,}"
+        elif abs(shown) >= 1:
+            text = f"{shown:.2f}"
+        elif abs(shown) >= 0.001:
+            text = f"{shown:.3f}"
+        elif shown == 0:
+            text = "0"
+        else:
+            text = f"{shown:.1e}"
+        return text, unit
+    return None
+
+
 def _check_card(res: dict) -> str:
     from .batch import check_label
 
@@ -398,7 +432,8 @@ def _check_card(res: dict) -> str:
     provisional = bool(res.get("provisional")) and verdict in ("FAIL", "WARN")
     metric = res.get("metric") or {}
     rows = "".join(
-        f"<tr><td>{esc(k)}</td><td>{esc(_fmt(v))}</td></tr>" for k, v in metric.items()
+        f"<tr><td>{esc(k)}</td><td>{esc(_fmt(v))}</td></tr>"
+        for k, v in metric.items() if k != "provenance"
     )
     details = ""
     if rows:
@@ -410,13 +445,17 @@ def _check_card(res: dict) -> str:
             if provisional else f'background:{fg}')
     prov_tag = ('<span class="prov-tag" title="decided by an uncalibrated cutoff">'
                 'provisional</span>' if provisional else "")
+    big = _headline(metric)
+    big_html = (f'<div class="bignum" style="color:{fg}">{esc(big[0])}'
+                f'{f"<small>{esc(big[1])}</small>" if big[1] else ""}</div>') if big else ""
     return (
         f'<div class="card check" id="{_slug(res["check"])}">'
         f'<div class="rail" style="{rail}"></div>'
         f'<div class="body"><div class="head">'
         f'<span class="vpill" style="background:{fg}">{esc(verdict)}</span>'
         f'<span class="cname">{esc(check_label(res["check"]))}</span>'
-        f'<span class="cid">{esc(res["check"])}</span>{prov_tag}</div>'
+        f'<span class="cid">{esc(res["check"])}</span>{prov_tag}'
+        f'{big_html}</div>'
         f'<p class="reason">{esc(res.get("reason", ""))}</p>'
         f'{details}</div></div>'
     )

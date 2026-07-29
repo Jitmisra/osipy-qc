@@ -51,6 +51,15 @@ _POP_ORDER = ["adult", "neonate"]
 _POP_LABELS = {"adult": "adult", "neonate": "neonate"}
 
 _CONSOLE_CSS = """
+.thr{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.7rem;margin:.7rem 0}
+.thr-f{display:flex;flex-direction:column;gap:.25rem}
+.thr-f span{font-size:.76rem;color:var(--muted)}
+.thr-f input{border:1px solid var(--line);border-radius:var(--radius-sm);padding:.45rem .6rem;
+  font:inherit;font-family:var(--mono);font-size:.85rem;background:var(--surface);color:var(--ink)}
+.thr-f input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.strict{display:flex;gap:.55rem;align-items:flex-start;font-size:.82rem;color:var(--muted)}
+.strict input{margin-top:.2rem}
+
 .dropall{display:flex;align-items:center;gap:1rem;padding:1.6rem 1.4rem;min-height:132px;
   border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface);
   cursor:pointer;transition:border-color .15s,background .15s}
@@ -127,6 +136,14 @@ _FILE_IC = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
             '<polyline points="13 2 13 9 20 9"/></svg>')
 
 
+def _thr(field: str, label: str, default: float, step: float) -> str:
+    """One threshold input. Left blank, the packaged default is used, so the
+    form never has to restate a value it does not intend to change."""
+    return (f'<label class="thr-f"><span>{esc(label)}</span>'
+            f'<input type="number" name="thr_{field}" step="{step}" '
+            f'placeholder="{default:g}" inputmode="decimal"></label>')
+
+
 def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
     req = " required" if required else ""
     return (
@@ -188,6 +205,24 @@ def _upload_page(error: str = "") -> str:
         found for you, and anything else is ignored.</small></div>
       <div class="picked" id="picked"></div>
     </label>
+
+    <details class="manual">
+      <summary>Thresholds &mdash; change what counts as a pass</summary>
+      <div class="thr">
+        {_thr("qei_pass", "QEI, pass above", 0.55, 0.01)}
+        {_thr("qei_warn", "QEI, fail below", 0.5, 0.01)}
+        {_thr("gm_cbf_lo", "GM CBF, band low", 40, 1)}
+        {_thr("gm_cbf_hi", "GM CBF, band high", 100, 1)}
+        {_thr("ratio_pass", "GM/WM ratio, min", 1.5, 0.1)}
+        {_thr("coverage_warn", "GM coverage, min", 0.9, 0.01)}
+        {_thr("scov_vascular", "sCoV, vascular above", 0.67, 0.01)}
+      </div>
+      <label class="strict">
+        <input type="checkbox" name="strict" value="1" checked>
+        <span>Strict &mdash; an uncalibrated cut-off may raise a FAIL. Turn off to
+        demote those to a WARN.</span>
+      </label>
+    </details>
 
     <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
     <div class="seg">{seg}</div>
@@ -368,6 +403,24 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
 
     population = (fields.get("population", ("", b"adult"))[1] or b"adult").decode()
     cfg = for_population(population)
+
+    # Threshold overrides from the form. Anything left blank keeps the packaged
+    # value, and a field that is not a number is ignored rather than silently
+    # becoming zero — a zero cut-off would pass everything.
+    for key, value in fields.items():
+        if not key.startswith("thr_") or not isinstance(value, tuple):
+            continue
+        raw = (value[1] or b"").decode(errors="replace").strip()
+        if not raw:
+            continue
+        name = key[4:]
+        if not hasattr(cfg, name):
+            continue
+        try:
+            setattr(cfg, name, float(raw))
+        except ValueError:
+            continue
+    cfg.strict = bool(fields.get("strict", ("", b""))[1])
 
     with tempfile.TemporaryDirectory(prefix="osipy_qc_") as tmp:
         def _save(field: str) -> str | None:
