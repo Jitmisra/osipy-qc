@@ -401,11 +401,10 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         import os
         import posixpath
 
-        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "web", "dist")
-        index = os.path.join(root, "index.html")
-        if not os.path.isfile(index):
+        root = _spa_root()
+        if root is None:
             return False
+        index = os.path.join(root, "index.html")
         rel = path.lstrip("/") or "index.html"
         target = os.path.normpath(os.path.join(root, rel))
         # never serve outside the build directory
@@ -614,6 +613,28 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:                # a bad upload must not kill the server
             traceback.print_exc()
             self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+
+
+def _spa_root() -> str | None:
+    """Locate the built React app, or None if it has not been built.
+
+    Three places, because an installed package and a source checkout do not put
+    it in the same one — and the difference is invisible locally, where the venv
+    usually points straight at the source tree:
+
+      1. inside the installed package (osipy_qc/webui), which is how a wheel
+         ships it;
+      2. beside the package in a source checkout (../web/dist);
+      3. under the current working directory, which is what a platform that
+         builds and then runs from the repo root ends up with.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "webui"),
+                 os.path.join(os.path.dirname(here), "web", "dist"),
+                 os.path.join(os.getcwd(), "web", "dist")):
+        if os.path.isfile(os.path.join(cand, "index.html")):
+            return cand
+    return None
 
 
 class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
