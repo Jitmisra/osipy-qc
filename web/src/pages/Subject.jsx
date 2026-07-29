@@ -48,7 +48,7 @@ function CheckCard({ check }) {
   return (
     <Card
       id={`chk-${check.id.replace(/\./g, '-')}`}
-      className="panel--card relative flex min-h-[168px] flex-col overflow-hidden"
+      className="panel--card relative flex flex-col self-start overflow-hidden"
     >
       {/* the spine states the verdict before any text is read; a provisional one
           is striped, so an uncalibrated cut-off never looks evidence-backed */}
@@ -94,7 +94,7 @@ function CheckCard({ check }) {
           )}
         </div>
 
-        <p className="mt-3 flex-1 text-[14px] leading-relaxed text-[var(--color-ink)]">{check.reason}</p>
+        <p className="mt-3 text-[14px] leading-relaxed text-[var(--color-ink)]">{check.reason}</p>
 
         {rows.length > 0 && (
           <div className="mt-3">
@@ -111,15 +111,31 @@ function CheckCard({ check }) {
               {rows.length} measurement{rows.length === 1 ? '' : 's'}
             </button>
             {open && (
-              <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-0 rounded-[var(--radius-sm)] bg-[var(--color-well)] px-3 py-2">
-                {rows.map(([k, val]) => (
-                  <div key={k} className="col-span-2 grid grid-cols-subgrid border-b border-[var(--color-line)] py-1.5 last:border-0">
-                    <dt className="truncate font-mono text-[12px] text-[var(--color-muted)]">{k}</dt>
-                    <dd className="num text-right font-mono text-[12px] font-medium">
-                      {typeof val === 'number' ? Number(val.toFixed(4)) : String(val)}
-                    </dd>
-                  </div>
-                ))}
+              <dl className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-well)] px-3 py-1.5">
+                {rows.map(([k, val]) => {
+                  const numeric = typeof val === 'number'
+                  return (
+                    <div
+                      key={k}
+                      className={`border-b border-[var(--color-line)] py-1.5 last:border-0 ${
+                        numeric ? 'flex items-baseline justify-between gap-4' : ''
+                      }`}
+                    >
+                      <dt className="font-mono text-[12px] text-[var(--color-muted)]">{k}</dt>
+                      {/* a measured number is right-aligned so decimals stack; a
+                          sentence is not a number and reads left, like prose */}
+                      <dd
+                        className={
+                          numeric
+                            ? 'num flex-none text-right font-mono text-[12px] font-medium'
+                            : 'mt-0.5 text-[12.5px] leading-relaxed text-[var(--color-ink)]'
+                        }
+                      >
+                        {numeric ? Number(val.toFixed(4)) : String(val)}
+                      </dd>
+                    </div>
+                  )
+                })}
               </dl>
             )}
           </div>
