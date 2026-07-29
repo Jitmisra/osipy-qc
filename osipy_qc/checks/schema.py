@@ -36,6 +36,42 @@ def classify_role(filename: str) -> str:
     return "other"
 
 
+# Order matters throughout: the most specific token wins, because real
+# filenames overlap. "perfusion_calib" is a CBF map, not a calibration scan;
+# "pvgm_inasl" is a grey-matter map, not an ASL series.
+_UPLOAD_ROLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("gm",  ("pvgm", "_gm", "gm_", "greymatter", "graymatter", "grey", "gray", "c1")),
+    ("wm",  ("pvwm", "_wm", "wm_", "whitematter", "white", "c2")),
+    ("csf", ("csf", "c3")),
+    ("cbf", ("cbf", "perfusion", "perf_calib", "_perf", "asl_calib")),
+    ("m0",  ("m0", "calib", "calibration")),
+    ("asl", ("pcasl", "pasl", "_asl", "asl_", "deltam", "control", "label", "tag")),
+    ("t1",  ("mprage", "t1w", "_t1", "t1_", "anat", "struct")),
+)
+
+
+def classify_upload(filename: str) -> str:
+    """Infer what an uploaded NIfTI is, for the single drop zone.
+
+    Richer than classify_role, which only separates asl / m0 / t1 for folder
+    scanning. Here a user drops everything at once and the form has to work out
+    which is the CBF map, which are tissue maps, and which are raw acquisition
+    files.
+
+    Returns one of: cbf, gm, wm, csf, asl, m0, t1, other.
+    """
+    name = filename.lower().rsplit("/", 1)[-1]
+    for role, tokens in _UPLOAD_ROLES:
+        if any(t in name for t in tokens):
+            return role
+    # a bare "t1.nii.gz" has no separator to match on
+    if name.startswith(("t1", "mprage")):
+        return "t1"
+    if name.startswith("asl"):
+        return "asl"
+    return "other"
+
+
 def guess_vendor(text: str) -> str:
     t = text.lower()
     # 'siemens'/'philips' are long and safe as substrings (and often concatenated,

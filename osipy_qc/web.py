@@ -51,6 +51,21 @@ _POP_ORDER = ["adult", "neonate"]
 _POP_LABELS = {"adult": "adult", "neonate": "neonate"}
 
 _CONSOLE_CSS = """
+.dropall{display:flex;align-items:center;gap:1rem;padding:1.6rem 1.4rem;min-height:132px;
+  border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface);
+  cursor:pointer;transition:border-color .15s,background .15s}
+.dropall:hover,.dropall.over{border-color:var(--accent);background:var(--accent-050)}
+.dropall .ico{font-size:1.7rem;color:var(--accent);line-height:1}
+.dropall .txt b{display:block;font-size:1.05rem}
+.dropall .txt small{color:var(--muted)}
+.picked{margin-left:auto;display:flex;flex-direction:column;gap:.2rem;max-width:46%}
+.picked span{font-family:var(--mono);font-size:.72rem;color:var(--muted);
+  display:flex;justify-content:space-between;gap:.6rem}
+.picked span b{color:var(--accent-600);font-weight:600}
+.manual{margin-top:1rem;border-top:1px solid var(--line);padding-top:.9rem}
+.manual summary{cursor:pointer;font-size:.85rem;color:var(--muted)}
+.manual summary:hover{color:var(--ink)}
+
 .stage{max-width:760px;margin:0 auto;padding:1rem 1.5rem 4rem}
 .lede{text-align:center;margin:1.5rem 0 2rem}
 .lede h1{font-size:clamp(1.9rem,5vw,2.7rem);font-weight:730;margin:.6rem 0 .4rem}
@@ -147,28 +162,32 @@ def _upload_page(error: str = "") -> str:
   </div>
   {err}
   <form id="qc" method="post" action="/run" enctype="multipart/form-data">
-    <div class="field-label">CBF map <span class="req">required</span></div>
-    {_dropzone("cbf", "Choose or drop a CBF map", "quantified CBF (mL/100g/min), NIfTI", required=True)}
+    <label class="drop dropall" for="files">
+      <input id="files" name="files" type="file" accept=".nii,.nii.gz" multiple hidden>
+      <div class="ico">&#8615;</div>
+      <div class="txt"><b>Drop your scan here</b>
+        <small>Every NIfTI at once &mdash; CBF map, tissue maps, ASL series, M0, structural.
+        Each one is recognised by its filename, so nothing needs sorting first.</small></div>
+      <div class="picked" id="picked"></div>
+    </label>
 
-    <div class="field-label">Tissue maps <span class="opt">optional &mdash; needed for QEI &amp; level checks</span></div>
-    <div class="tissue-grid">
-      {_dropzone("gm", "Grey matter", "GM probability map")}
-      {_dropzone("wm", "White matter", "WM probability map")}
-      {_dropzone("csf", "CSF", "derived if omitted")}
-      <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
-        <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
-    </div>
-
-    <div class="field-label">Raw acquisition
-      <span class="opt">optional &mdash; unlocks the schema, M0, motion and data-type checks</span></div>
-    <div class="grid2">
-      {_dropzone("raw_asl", "ASL series", "4D control/label, or dM")}
-      {_dropzone("raw_m0", "M0", "the calibration scan")}
-      {_dropzone("raw_t1", "Structural", "T1 / MPRAGE")}
-      <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
-        <div class="txt"><small>Keep the original filenames &mdash; the vendor and
-        sequence are read from them.</small></div></div>
-    </div>
+    <details class="manual">
+      <summary>Or place each file yourself</summary>
+      <div class="field-label">CBF map <span class="req">required</span></div>
+      {_dropzone("cbf", "Choose or drop a CBF map", "quantified CBF (mL/100g/min), NIfTI")}
+      <div class="field-label">Tissue maps <span class="opt">needed for QEI &amp; level checks</span></div>
+      <div class="grid2">
+        {_dropzone("gm", "Grey matter", "GM probability map")}
+        {_dropzone("wm", "White matter", "WM probability map")}
+        {_dropzone("csf", "CSF", "derived if omitted")}
+      </div>
+      <div class="field-label">Raw acquisition <span class="opt">unlocks schema, M0, motion</span></div>
+      <div class="grid2">
+        {_dropzone("raw_asl", "ASL series", "4D control/label, or dM")}
+        {_dropzone("raw_m0", "M0", "the calibration scan")}
+        {_dropzone("raw_t1", "Structural", "T1 / MPRAGE")}
+      </div>
+    </details>
 
     <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
     <div class="seg">{seg}</div>
@@ -209,6 +228,37 @@ def _upload_page(error: str = "") -> str:
   // With JS off, the form does a normal POST and still works.
   var form = document.getElementById('qc');
   var overlay = document.getElementById('overlay');
+  var multi = document.getElementById('files');
+  var picked = document.getElementById('picked');
+  var zone = document.querySelector('.dropall');
+  function role(n){{
+    n = n.toLowerCase();
+    if(/pvgm|_gm|gm_|grey|gray/.test(n)) return 'grey matter';
+    if(/pvwm|_wm|wm_|white/.test(n))     return 'white matter';
+    if(/csf/.test(n))                    return 'CSF';
+    if(/cbf|perfusion/.test(n))          return 'CBF map';
+    if(/m0|calib/.test(n))               return 'M0';
+    if(/pcasl|pasl|asl|deltam|control|label/.test(n)) return 'ASL series';
+    if(/mprage|t1|anat|struct/.test(n))  return 'structural';
+    return 'not recognised';
+  }}
+  function show(){{
+    picked.innerHTML = '';
+    for(var i=0;i<multi.files.length;i++){{
+      var f = multi.files[i], s = document.createElement('span');
+      s.innerHTML = '<span>'+f.name+'</span><b>'+role(f.name)+'</b>';
+      picked.appendChild(s);
+    }}
+  }}
+  multi.addEventListener('change', show);
+  ['dragenter','dragover'].forEach(function(e){{
+    zone.addEventListener(e, function(ev){{ ev.preventDefault(); zone.classList.add('over'); }});
+  }});
+  ['dragleave','drop'].forEach(function(e){{
+    zone.addEventListener(e, function(ev){{ ev.preventDefault(); zone.classList.remove('over'); }});
+  }});
+  zone.addEventListener('drop', function(ev){{ multi.files = ev.dataTransfer.files; show(); }});
+
   form.addEventListener('submit', function(ev){{
     if(!window.fetch){{ return; }}
     ev.preventDefault();
@@ -267,7 +317,14 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, byt
                 name = nm.group(1) if nm else None
                 filename = fn.group(1) if fn else ""
         if name:
-            out[name] = (filename or "", data)
+            # A multi-file input sends one part per file, all under the same
+            # name, so those are collected rather than overwriting each other.
+            # Single-file fields keep their (filename, bytes) shape so every
+            # existing caller is unaffected.
+            if name == "files":
+                out.setdefault("files_multi", []).append((filename or "", data))
+            else:
+                out[name] = (filename or "", data)
     return out
 
 
@@ -293,9 +350,8 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
     """
     from .io import load_cbf_inputs
 
+    from .checks.schema import classify_upload
     cbf_name, cbf_bytes = fields.get("cbf", ("", b""))
-    if not cbf_bytes:
-        raise ValueError("No CBF map was uploaded.")
 
     population = (fields.get("population", ("", b"adult"))[1] or b"adult").decode()
     cfg = for_population(population)
@@ -312,7 +368,33 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
                 fh.write(data)
             return path
 
-        paths = {k: _save(k) for k in ("cbf", "gm", "wm", "csf")}
+        # Files dropped into the single zone arrive as repeated "files" parts.
+        # Their role is inferred from the filename, so the reader does not have
+        # to know which of seven boxes each one belongs in.
+        detected: dict[str, str] = {}
+        for fname, data in fields.get("files_multi", []):
+            role = classify_upload(fname)
+            if role == "other" or not data:
+                continue
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
+            if not safe.endswith((".nii", ".nii.gz")):
+                safe += ".nii.gz"
+            if role in ("cbf", "gm", "wm", "csf"):
+                if role in detected:            # first of a kind wins
+                    continue
+                dest = os.path.join(tmp, safe)
+                detected[role] = dest
+            else:                                # asl / m0 / t1 -> the raw folder
+                os.makedirs(os.path.join(tmp, "raw"), exist_ok=True)
+                dest = os.path.join(tmp, "raw", safe)
+            with open(dest, "wb") as fh:
+                fh.write(data)
+
+        paths = {k: _save(k) or detected.get(k) for k in ("cbf", "gm", "wm", "csf")}
+        if not paths["cbf"]:
+            raise ValueError(
+                "No CBF map found. Include a file whose name says so — cbf, "
+                "perfusion, or perfusion_calib.")
         inputs = load_cbf_inputs(paths["cbf"], gm=paths["gm"], wm=paths["wm"],
                                  csf=paths["csf"])
 
@@ -326,9 +408,13 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         # basename is stripped of any path and reduced to safe characters, which
         # keeps the role legible without trusting the client.
         raw_dir = os.path.join(tmp, "raw")
-        saved_raw = False
-        for field, (fname, data) in fields.items():
-            if not field.startswith("raw") or not data:
+        saved_raw = os.path.isdir(raw_dir)
+        for field, value in fields.items():
+            # files_multi holds a list, not a (name, bytes) pair
+            if not field.startswith("raw") or not isinstance(value, tuple):
+                continue
+            fname, data = value
+            if not data:
                 continue
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
             if not safe.endswith((".nii", ".nii.gz")):
@@ -347,7 +433,9 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
 
         from .api import subject_payload
         from .batch import Subject
-        sid = os.path.basename(cbf_name) or "uploaded scan"
+        sid = (os.path.basename(cbf_name)
+               or os.path.basename(paths["cbf"] or "")
+               or "uploaded scan")
         subject = Subject(sid=sid, report=report, inputs=inputs, cfg=cfg)
         # hold the graded arrays briefly so /figure/ can render from them; the
         # temp dir is gone by then, but the loaded arrays are not
