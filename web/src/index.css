@@ -6,11 +6,11 @@
 
 @theme {
   /* ---- surfaces (light) ------------------------------------------------ */
-  --color-paper: #f4f3ee;  /* ground base + row-hover + field fill      */
+  --color-paper: #ffffff;  /* ground base + row-hover + field fill      */
   --color-surface: #ffffff;  /* .panel — every opaque data surface        */
-  --color-well: #edebe4;  /* .raised — nested blocks, theads, drawers  */
-  --color-track: #e3e0d7;  /* .well  — meter tracks, inputs (NEW)       */
-  --color-line: #ddd9cf;
+  --color-well: #f5f5f4;  /* .raised — nested blocks, theads, drawers  */
+  --color-track: #ececea;  /* .well  — meter tracks, inputs (NEW)       */
+  --color-line: #e3e1dd;
   --color-line-strong: #b1ada1;  /* NEW: hover borders, sort arrows           */
   --color-ink: #1f1d1a;
   --color-muted: #57534a;
