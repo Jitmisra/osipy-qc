@@ -71,10 +71,20 @@ _CONSOLE_CSS = """
 .strict{display:flex;gap:.55rem;align-items:flex-start;font-size:.82rem;color:var(--muted)}
 .strict input{margin-top:.2rem}
 
-.dropall{display:flex;align-items:center;gap:1rem;padding:1.6rem 1.4rem;min-height:132px;
+.dropall{display:flex;align-items:center;gap:1rem;padding:1.5rem 1.4rem;min-height:132px;
   border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface);
-  cursor:pointer;transition:border-color .15s,background .15s}
-.dropall:hover,.dropall.over{border-color:var(--accent);background:var(--accent-050)}
+  transition:border-color .15s,background .15s}
+.dropall.over{border-color:var(--accent);background:var(--accent-050)}
+.dropbtns{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
+.dbtn{display:inline-flex;align-items:center;min-height:38px;padding:0 1rem;
+  font:inherit;font-size:.9rem;font-weight:600;cursor:pointer;
+  border-radius:100px;border:1px solid transparent;
+  background:var(--accent-fill);color:#fff;
+  box-shadow:0 1px 2px rgba(16,24,40,.16)}
+.dbtn:hover{background:var(--accent-600)}
+.dbtn-alt{background:var(--surface);color:var(--accent-600);border-color:var(--line);
+  box-shadow:none}
+.dbtn-alt:hover{background:var(--accent-050);border-color:var(--accent);color:var(--accent-600)}
 .dropall .ico{font-size:1.7rem;color:var(--accent);line-height:1}
 .dropall .txt b{display:block;font-size:1.05rem}
 .dropall .txt small{color:var(--muted)}
@@ -228,17 +238,21 @@ def _upload_page(error: str = "") -> str:
 
     <div class="field-label">Raw acquisition
       <span class="opt">optional &mdash; unlocks the schema, M0, motion and data-type checks</span></div>
-    <label class="drop dropall" for="files">
+    <div class="drop dropall" id="zone">
       <input id="files" name="files" type="file" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream" multiple hidden>
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
-      <div class="txt"><b>Drop the raw files here</b>
-        <small>The ASL series, M0 and structural together &mdash; each is recognised by its
-        filename, so keep them as the scanner named them.
-        <br><a href="#" id="pickdir">Or choose a whole scan folder</a> &mdash; its NIfTIs are
-        found for you, and anything else is ignored.</small></div>
+      <div class="txt">
+        <b>Drop the raw files here</b>
+        <small>The ASL series, M0 and structural. Each is recognised by its filename;
+        if a name is unusual, use the boxes underneath instead.</small>
+        <div class="dropbtns">
+          <button type="button" id="pickfiles" class="dbtn">Choose files&hellip;</button>
+          <button type="button" id="pickdir" class="dbtn dbtn-alt">Choose a folder&hellip;</button>
+        </div>
+      </div>
       <div class="picked" id="picked"></div>
-    </label>
+    </div>
 
     <details class="manual" id="byrole">
       <summary>Or say what each file is &mdash; use this if a name is not recognised</summary>
@@ -322,7 +336,7 @@ def _upload_page(error: str = "") -> str:
 
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
-  var zone = document.querySelector('.dropall');
+  var zone = document.getElementById('zone');
   // Mirrors classify_role in checks/schema.py. When these two disagree the page
   // tells the reader their file is unusable while the server would have taken
   // it — which is exactly what happened to a reviewer's conAFeHe73_1_pairs.nii.
@@ -343,9 +357,11 @@ def _upload_page(error: str = "") -> str:
     }}
   }}
   var folder = document.getElementById('folder');
-  var pickdir = document.getElementById('pickdir');
-  pickdir.addEventListener('click', function(ev){{
-    ev.preventDefault(); ev.stopPropagation(); folder.click();
+  document.getElementById('pickfiles').addEventListener('click', function(ev){{
+    ev.preventDefault(); multi.click();
+  }});
+  document.getElementById('pickdir').addEventListener('click', function(ev){{
+    ev.preventDefault(); folder.click();
   }});
   // a folder carries everything in it, so only the NIfTIs are kept
   folder.addEventListener('change', function(){{
