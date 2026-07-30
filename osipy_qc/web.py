@@ -240,6 +240,17 @@ def _upload_page(error: str = "") -> str:
       <div class="picked" id="picked"></div>
     </label>
 
+    <details class="manual" id="byrole">
+      <summary>Or say what each file is &mdash; use this if a name is not recognised</summary>
+      <p class="thr-note">Nothing here depends on the filename. Whatever you put in a box is
+        treated as that kind of file.</p>
+      <div class="grid2">
+        {_dropzone("raw_asl", "ASL series", "4D control/label, pairs, or pre-subtracted dM")}
+        {_dropzone("raw_m0", "M0", "the calibration scan")}
+        {_dropzone("raw_t1", "Structural", "T1 / MPRAGE")}
+      </div>
+    </details>
+
     <details class="manual">
       <summary>Thresholds &mdash; change what counts as a pass</summary>
       <p class="thr-note">Every field is optional. Leave one blank and the packaged value for
@@ -312,12 +323,16 @@ def _upload_page(error: str = "") -> str:
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
   var zone = document.querySelector('.dropall');
+  // Mirrors classify_role in checks/schema.py. When these two disagree the page
+  // tells the reader their file is unusable while the server would have taken
+  // it — which is exactly what happened to a reviewer's conAFeHe73_1_pairs.nii.
   function role(n){{
     n = n.toLowerCase();
-    if(/m0|calib/.test(n))                            return 'M0';
-    if(/pcasl|pasl|asl|deltam|control|label/.test(n)) return 'ASL series';
-    if(/mprage|t1|anat|struct/.test(n))               return 'structural';
-    return 'not recognised';
+    if(/m0|calib/.test(n)) return 'M0';
+    if(/pcasl|pasl|asl|perf|cbf|deltam|delta_m|pair|control|ctrl|label|tag|subtract/.test(n)
+       || /^(con|tag|diff|dm)/.test(n)) return 'ASL series';
+    if(/mprage|t1|anat|struct/.test(n)) return 'structural';
+    return 'name unclear \u2014 use the boxes below';
   }}
   function show(src){{
     picked.innerHTML = '';

@@ -29,7 +29,10 @@ def classify_role(filename: str) -> str:
     name = filename.lower()
     if "m0" in name:
         return "m0"
-    if any(t in name for t in ("pcasl", "pasl", "asl", "perf", "cbf", "deltam")):
+    if any(t in name for t in ("pcasl", "pasl", "asl", "perf", "cbf", "deltam", "delta_m",
+                               "pair", "control", "ctrl", "label", "tag", "subtract")):
+        return "asl"
+    if name.startswith(("con", "tag", "diff", "dm")):
         return "asl"
     if any(t in name for t in ("mprage", "t1", "anat", "struct")):
         return "t1"
@@ -45,7 +48,8 @@ _UPLOAD_ROLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("csf", ("csf", "c3")),
     ("cbf", ("cbf", "perfusion", "perf_calib", "_perf", "asl_calib")),
     ("m0",  ("m0", "calib", "calibration")),
-    ("asl", ("pcasl", "pasl", "_asl", "asl_", "deltam", "control", "label", "tag")),
+    ("asl", ("pcasl", "pasl", "_asl", "asl_", "deltam", "delta_m", "control", "label",
+             "tag", "pair", "_diff", "diff_", "subtract", "_dm", "dm_", "ctrl")),
     ("t1",  ("mprage", "t1w", "_t1", "t1_", "anat", "struct")),
 )
 
@@ -67,7 +71,7 @@ def classify_upload(filename: str) -> str:
     # a bare "t1.nii.gz" has no separator to match on
     if name.startswith(("t1", "mprage")):
         return "t1"
-    if name.startswith("asl"):
+    if name.startswith(("asl", "con", "tag", "diff", "dm")):
         return "asl"
     return "other"
 
