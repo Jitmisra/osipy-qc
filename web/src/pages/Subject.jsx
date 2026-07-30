@@ -3,15 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { fetchSubject, figureUrl } from '../lib/api.js'
 import {
   Card, SectionTitle, Button, VerdictPill, VerdictDot, SubjectSkeleton, ErrorNote, Lightbox,
-  BandMeter, verdictOf,
+  BandMeter, CoverageMeter, NotGradedStrip, verdictGloss, verdictOf,
 } from '../lib/ui.jsx'
-
-const GLOSS = {
-  PASS: 'This scan looks usable. Every applicable check passed.',
-  WARN: 'Usable with caveats — one or more checks flagged something worth reviewing.',
-  FAIL: 'At least one check found a disqualifying problem. Inspect before using this scan.',
-  UNKNOWN: 'Not enough was provided to reach a verdict.',
-}
 
 /** The headline number a check produced, if it produced one worth showing. */
 function headline(check) {
@@ -185,7 +178,9 @@ export default function Subject({ cohort }) {
           <h1 className="text-[28px] font-bold tracking-tight">Participant quality report</h1>
           <p className="mt-1 text-sm text-[var(--color-muted)]">
             <b className="font-mono text-[var(--color-ink)]">{data.sid}</b> · {data.population} profile ·{' '}
-            <b style={{ color: v.fg }}>{data.verdict}</b>
+            {/* the verdict never appears without its coverage, not even in a meta line */}
+            <b style={{ color: v.fg }}>{data.verdict}</b> ·{' '}
+            <span className="num">{data.coverage.graded} of {data.coverage.total}</span> checks graded
           </p>
         </div>
         <div className="no-print flex gap-2">
@@ -222,8 +217,9 @@ export default function Subject({ cohort }) {
                 {data.verdict}
               </div>
               <p className="mt-1.5 text-[14.5px] text-[var(--color-muted)]">
-                {GLOSS[data.verdict] || ''}
+                {verdictGloss(data.verdict, data.coverage)}
               </p>
+              <CoverageMeter coverage={data.coverage} className="mt-2.5" />
             </div>
           </div>
 
@@ -254,6 +250,8 @@ export default function Subject({ cohort }) {
             ))}
           </div>
         )}
+
+        <NotGradedStrip coverage={data.coverage} checks={data.checks} />
       </Card>
 
       {/* findings before images: the checks are the diagnosis, the pictures are evidence */}
@@ -322,9 +320,10 @@ export default function Subject({ cohort }) {
       <Card className="border-l-[3px] border-l-[var(--color-accent)] bg-[var(--color-accent-050)] p-4 text-[13px] leading-relaxed">
         A verdict marked <b>provisional</b> was decided by an <b>uncalibrated</b> cut-off — an
         engineering default with no published derivation. Under strict grading it can raise a
-        failure; turn strict off and it becomes a warning instead. Checks marked <b>N/A</b> or{' '}
-        <b>INFO</b> are excluded from the overall verdict. Every threshold, with the source it
-        came from, is listed under <b>Thresholds</b>.
+        failure; turn strict off and it becomes a warning instead. Checks marked <b>N/A</b>,{' '}
+        <b>INFO</b> or <b>UNKNOWN</b> are excluded from the overall verdict — each reports an
+        absence, not a finding, which is what the <b>checks graded</b> count above is for. Every
+        threshold, with the source it came from, is listed under <b>Thresholds</b>.
       </Card>
 
       <Lightbox src={zoom?.src} alt={zoom?.alt} onClose={() => setZoom(null)} />

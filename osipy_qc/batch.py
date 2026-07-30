@@ -118,16 +118,26 @@ class Subject:
         """The check most responsible for this subject's verdict: the first FAIL,
         else the first WARN, else '-'. This is what the ledger shows.
 
-        A WARN driven only by UNKNOWN inputs (nothing actually flagged, the scan
-        just could not be fully graded) reads as 'incomplete', not a flag —
-        'couldn't grade' is a different message from 'looks borderline'."""
+        A scan that simply could not be fully graded reads as 'incomplete', not
+        as a flag — 'couldn't grade' is a different message from 'looks
+        borderline'.
+
+        This used to be gated on `self.overall == "WARN"`, which was correct only
+        while UNKNOWN escalated to WARN. Now that it does not, that condition can
+        never hold here: reaching it means no result was FAIL or WARN, so the
+        overall cannot be WARN either, and the ledger showed '-' for a subject
+        graded on one check out of eleven — identical to a fully graded clean one.
+        The gate is now the unknowns themselves, which is what the column is
+        actually reporting."""
         for want in (Verdict.FAIL, Verdict.WARN):
             for r in self.report.results:
                 if r.verdict is want:
                     return check_label(r.check)
         n_unknown = sum(1 for r in self.report.results if r.verdict is Verdict.UNKNOWN)
-        if self.overall == "WARN" and n_unknown:
-            return f"incomplete ({n_unknown} n/a)"
+        if n_unknown:
+            # "unknown", not "n/a": N/A means the check cannot apply to this data
+            # and is not a gap, whereas these are gaps.
+            return f"incomplete ({n_unknown} unknown)"
         return "-"
 
 

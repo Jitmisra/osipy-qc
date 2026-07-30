@@ -26,8 +26,8 @@ from .batch import TUNABLE_GROUPS, BatchSummary, Subject, check_label
 from .core.config import (POPULATIONS, THRESHOLD_PROVENANCE, QCConfig,
                           provenance_of)
 from .core.registry import all_checks
-from .utils.imaging import (encode_png, histogram_svg, mosaic_window,
-                            ramp_stops, slice_mosaic)
+from .utils.imaging import (CBF_UNITS, encode_png, histogram_svg, mosaic_window,
+                            negative_colour, ramp_stops, slice_mosaic)
 from .utils.masks import covered_tissue_mask
 
 #: Stream id -> the human name used in the UI.
@@ -124,7 +124,7 @@ def _kpis(by: dict[str, dict], cfg: QCConfig) -> list[dict]:
 
     add("1.qei", "qei", "QEI", "", "0.000", f"cut-off {cfg.qei_warn:g}",
         band=(cfg.qei_warn, 1.0), axis=(0.0, 1.0))
-    add("3.1.cbf_level", "mean_gm_cbf", "GM CBF", "mL/100g/min", "0.0",
+    add("3.1.cbf_level", "mean_gm_cbf", "GM CBF", CBF_UNITS, "0.0",
         f"{cfg.population} band {cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g}",
         band=(cfg.gm_cbf_lo, cfg.gm_cbf_hi), axis=(0.0, cfg.gm_cbf_fail_hi))
     add("3.2.gm_wm_ratio", "gm_wm_ratio", "GM / WM ratio", "", "0.00",
@@ -151,14 +151,21 @@ def _figure_list(inputs: dict) -> list[dict]:
     win = None
     if cbf is not None:
         lo, hi = mosaic_window(cbf)
-        win = {"vmin": _num(lo), "vmax": _num(hi), "unit": "mL/100g/min",
+        win = {"vmin": _num(lo), "vmax": _num(hi), "unit": CBF_UNITS,
                "ramp": [{"at": t, "color": c} for t, c in ramp_stops()],
                "note": "windowed to this scan's 2nd-98th percentile, so colours "
                        "are not comparable between scans"}
     if cbf is not None:
         figs.append({"name": "cbf", "kind": "png", "title": "CBF map", "window": win,
-                     "caption": "Evenly spaced axial slices. Blue marks negative CBF, "
-                                "which is non-physical and indicates noise or a subtraction artefact."})
+                     # The colour is READ from the renderer, not named here. This
+                     # caption used to say "Blue marks negative CBF" while the code
+                     # paints negatives cyan - and the ramp's own low end IS a
+                     # blue-dominant dark violet, so the sentence pointed reviewers
+                     # at ordinary low-perfusion voxels and called them artefacts.
+                     "caption": f"Evenly spaced axial slices, dark = low, bright yellow = high. "
+                                f"Voxels below zero are painted cyan ({negative_colour()}): "
+                                "negative CBF is non-physical and indicates noise or a "
+                                "subtraction artefact."})
     if inputs.get("cbf") is not None and inputs.get("gm") is not None:
         figs.append({"name": "gm_hist", "kind": "svg", "title": "Grey-matter CBF distribution",
                      "caption": "The shaded band is the expected range for this population. If that range falls outside the plotted values, the chart says so instead."})
@@ -185,6 +192,11 @@ def subject_payload(subject: Subject) -> dict:
         "verdict": d["overall_verdict"],
         "summary": d["summary"],
         "nChecks": d["n_checks"],
+        # Travels with the verdict, never separately. Since UNKNOWN stopped
+        # escalating to WARN, `verdict` alone cannot distinguish "everything was
+        # measured and it is fine" from "almost nothing could be measured" - both
+        # read PASS. The UI must say which.
+        "coverage": d["coverage"],
         "population": subject.cfg.population,
         "qeiCutoff": _num(subject.cfg.qei_warn),
         "organ": subject.cfg.organ,
@@ -343,7 +355,14 @@ def figure_bytes(subject: Subject, name: str) -> tuple[bytes, str]:
         if gm_a.shape != cbf_a.shape:
             raise KeyError(name)
         overlay = np.where(gm_a > cfg.tissue_thresh, cbf_a, 0.0)
-        return encode_png(slice_mosaic(overlay)), "image/png"
+        # Render at the WHOLE-CBF window, which is the one _figure_list declares
+        # to the client. Letting this autoscale to the overlay made the colour bar
+        # a lie: on a clean synthetic scan the payload advertised -2.2..62.4 while
+        # the image was drawn 42.4..63.3, so the bar's low end was wrong by 44.5
+        # mL/100 g/min. It also made the masked view incomparable with the CBF
+        # view of the same scan.
+        lo, hi = mosaic_window(cbf_a)
+        return encode_png(slice_mosaic(overlay, vmin=lo, vmax=hi)), "image/png"
 
     if name in ("gm_hist", "wm_hist"):
         tissue = inputs.get("gm" if name == "gm_hist" else "wm")
@@ -351,10 +370,10 @@ def figure_bytes(subject: Subject, name: str) -> tuple[bytes, str]:
             raise KeyError(name)
         vals = np.asarray(cbf, dtype=float)[covered_tissue_mask(cbf, tissue, cfg.tissue_thresh)]
         if name == "gm_hist":
-            label = f"GM CBF (mL/100g/min) - {cfg.population} band shaded"
+            label = f"GM CBF ({CBF_UNITS}) - {cfg.population} band shaded"
             band = [(cfg.gm_cbf_lo, cfg.gm_cbf_hi, "#CFEBDD")]
         else:
-            label = "WM CBF (mL/100g/min)"
+            label = f"WM CBF ({CBF_UNITS})"
             band = [(cfg.wm_cbf_lo, cfg.wm_cbf_hi, "#CFEBDD")]
         return histogram_svg(vals, label=label, bands=band).encode("utf-8"), "image/svg+xml"
 

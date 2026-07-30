@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass, field
 
 from .core import CheckResult, QCConfig, Verdict, aggregate, all_checks
+from .core.result import coverage
 
 
 @dataclass
@@ -18,11 +19,25 @@ class QCReport:
     overall: Verdict
     results: list[CheckResult] = field(default_factory=list)
 
+    @property
+    def coverage(self) -> dict:
+        """How much of this report was actually decided. See core.result.coverage.
+
+        `overall` alone is not a complete answer: since UNKNOWN stopped
+        escalating, a report where almost nothing could be measured yields the
+        same PASS as a report where everything was. This says which it was, and
+        every renderer is expected to show it.
+        """
+        return coverage(self.results)
+
     def to_dict(self) -> dict:
         return {
             "overall_verdict": self.overall.value,
             "n_checks": len(self.results),
             "summary": self._summary(),
+            # Emitted next to the verdict, not tucked away, because a consumer
+            # reading only `overall_verdict` would not know the report was partial.
+            "coverage": self.coverage,
             "checks": [r.to_dict() for r in self.results],
         }
 

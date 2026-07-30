@@ -77,12 +77,19 @@ _HOT = [
     (0.75, (249, 140, 10)), (0.88, (249, 201, 50)), (1.00, (252, 255, 164)),
 ]
 # A cool cyan for negative values: physically impossible CBF must be *visible*
-# against the warm ramp, not lost in the dark low end.
+# against the warm ramp, not lost in the dark low end. It is deliberately NOT the
+# histogram's negative blue (#3B6FA8): that one has to carry on white paper, this
+# one on a near-black image, and a single colour cannot do both. So captions must
+# name the two separately rather than calling both "blue".
 _NEG = (60, 200, 230)
+
+#: The unit a CBF map is quantified in. One spelling in one place, so a figure
+#: and the caption that repeats its numbers cannot disagree about the units.
+CBF_UNITS = "mL/100 g/min"
 
 
 def colorise(slice2d: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
-    """Map a 2-D slice to RGB. Negative voxels are painted blue so the report
+    """Map a 2-D slice to RGB. Negative voxels are painted cyan so the report
     shows them rather than hiding them at the bottom of the ramp."""
     a = np.asarray(slice2d, dtype=float)
     a = np.where(np.isfinite(a), a, 0.0)
@@ -114,6 +121,26 @@ def mosaic_window(volume: np.ndarray) -> tuple[float, float]:
 def ramp_stops() -> list[tuple[float, str]]:
     """The perfusion colour ramp as (offset, #rrggbb), for drawing a colourbar."""
     return [(t, "#%02x%02x%02x" % rgb) for t, rgb in _HOT]
+
+
+def negative_colour() -> str:
+    """The colour `colorise` paints impossible (negative) CBF, as #rrggbb.
+
+    Exposed so a caption can *read* the colour it is about to name instead of
+    guessing it: the mosaic caption used to say "blue" while the code painted
+    cyan, and the ramp's own low end is a dark violet a reader will happily
+    mistake for blue.
+    """
+    return "#%02x%02x%02x" % _NEG
+
+
+def format_level(v: float) -> str:
+    """A CBF number as short as it can be written without lying.
+
+    Shared by a colourbar tick and any prose that repeats the same number, so the
+    two can never round it differently.
+    """
+    return f"{v:.0f}" if abs(v) >= 10 else f"{v:.3g}"
 
 
 def slice_mosaic(volume: np.ndarray, n: int = 12, cols: int = 6,
@@ -158,8 +185,81 @@ def _esc(s) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def colorbar_svg(vmin: float, vmax: float, width: int = 280, height: int = 46,
+                 label: str = CBF_UNITS, n: int = 96) -> str:
+    """The colour scale for a mosaic: the ramp, numeric ticks and the unit.
+
+    A mosaic without this is a pretty picture — the reviewer cannot tell 60 from
+    600, which is the difference between a healthy scan and a broken M0.
+
+    The swatches are produced by `colorise` itself rather than from a second copy
+    of the ramp, so the bar cannot drift from the image it explains: a window
+    whose low end is negative comes back showing the negative colour there,
+    exactly as those voxels are painted.
+
+    Colours are literal rather than CSS variables because this SVG is also served
+    on its own as image/svg+xml, where a variable resolves to nothing. That also
+    means the bar adds no colour token for a print block to re-declare.
+    """
+    lo, hi = float(vmin), float(vmax)
+    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return '<svg width="10" height="10"></svg>'
+
+    x0 = 6.0
+    pw = width - 2 * x0
+    span = hi - lo
+
+    def sx(v: float) -> float:
+        return x0 + (v - lo) / span * pw
+
+    mids = lo + (np.arange(n) + 0.5) / n * span
+    swatches = colorise(mids[None, :], lo, hi)[0]
+
+    parts = [f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+             'xmlns="http://www.w3.org/2000/svg" role="img">',
+             f'<title>Colour scale, {format_level(lo)} to {format_level(hi)} '
+             f'{_esc(label)}</title>']
+
+    # `n` swatches rather than a gradient, because a gradient would need its own
+    # copy of the ramp. 96 is where the steps stop being visible: a stepped bar
+    # implies the image is quantised, and it is not.
+    bw = pw / n
+    for i, px in enumerate(swatches):
+        fill = "#%02x%02x%02x" % tuple(int(c) for c in px)
+        # +0.6 overlap: abutting rects at fractional x leave hairline seams
+        parts.append(f'<rect x="{x0 + i * bw:.1f}" y="4" width="{bw + 0.6:.1f}" height="13" '
+                     f'fill="{fill}"/>')
+    # An outline, because the ramp's top end is a pale yellow that otherwise
+    # bleeds into the page and hides where the scale stops.
+    parts.append(f'<rect x="{x0:.1f}" y="4" width="{pw:.1f}" height="13" fill="none" '
+                 'stroke="#8a7d6d"/>')
+
+    # Ends first, then the physical zero — where impossible values stop matters
+    # more than the middle of a scale — then the midpoint. A tick is dropped if
+    # its label would collide with one already placed, judged from the label's own
+    # width (monospace at font-size 10 is about 6 px per character).
+    def half_label(v: float) -> float:
+        return 3.0 * len(format_level(v))
+
+    ticks: list[float] = []
+    for v in [lo, hi] + ([0.0] if lo < 0 < hi else []) + [lo + span / 2]:
+        if all(abs(sx(v) - sx(k)) > half_label(v) + half_label(k) + 4 for k in ticks):
+            ticks.append(v)
+
+    fs = 'font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6B5D4F"'
+    for v in ticks:
+        anchor = "start" if v == lo else "end" if v == hi else "middle"
+        tx = x0 if v == lo else (x0 + pw if v == hi else sx(v))
+        parts.append(f'<line x1="{sx(v):.1f}" y1="17" x2="{sx(v):.1f}" y2="21" stroke="#6B5D4F"/>')
+        parts.append(f'<text x="{tx:.1f}" y="31" text-anchor="{anchor}" {fs}>'
+                     f'{format_level(v)}</text>')
+    parts.append(f'<text x="{width / 2:.0f}" y="43" text-anchor="middle" {fs}>{_esc(label)}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def histogram_svg(values: np.ndarray, bins: int = 40, width: int = 520,
-                  height: int = 200, label: str = "CBF (mL/100g/min)",
+                  height: int = 200, label: str = f"CBF ({CBF_UNITS})",
                   bands: list[tuple[float, float, str]] | None = None) -> str:
     """A hand-drawn SVG histogram — the plot Maria asked to see.
 

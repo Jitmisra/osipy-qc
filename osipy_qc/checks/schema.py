@@ -23,57 +23,51 @@ from ..core.result import CheckResult, Verdict
 # --------------------------------------------------------------------------- #
 # 8.2  data-type detection (pure inference from shape + filename)
 # --------------------------------------------------------------------------- #
-def classify_role(filename: str) -> str:
-    """Infer a file's role from its name. ASL is checked BEFORE T1 so a name like
-    'PCASL_T1corrected' is tagged ASL (the modality token wins over a stray 't1')."""
-    name = filename.lower()
-    if "m0" in name:
-        return "m0"
-    if any(t in name for t in ("pcasl", "pasl", "asl", "perf", "cbf", "deltam", "delta_m",
-                               "pair", "control", "ctrl", "label", "tag", "subtract")):
-        return "asl"
-    if name.startswith(("con", "tag", "diff", "dm")):
-        return "asl"
-    if any(t in name for t in ("mprage", "t1", "anat", "struct")):
-        return "t1"
-    return "other"
-
-
-# Order matters throughout: the most specific token wins, because real
-# filenames overlap. "perfusion_calib" is a CBF map, not a calibration scan;
-# "pvgm_inasl" is a grey-matter map, not an ASL series.
-_UPLOAD_ROLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("gm",  ("pvgm", "_gm", "gm_", "greymatter", "graymatter", "grey", "gray", "c1")),
-    ("wm",  ("pvwm", "_wm", "wm_", "whitematter", "white", "c2")),
-    ("csf", ("csf", "c3")),
-    ("cbf", ("cbf", "perfusion", "perf_calib", "_perf", "asl_calib")),
-    ("m0",  ("m0", "calib", "calibration")),
-    ("asl", ("pcasl", "pasl", "_asl", "asl_", "deltam", "delta_m", "control", "label",
-             "tag", "pair", "_diff", "diff_", "subtract", "_dm", "dm_", "ctrl")),
-    ("t1",  ("mprage", "t1w", "_t1", "t1_", "anat", "struct")),
+# The filename vocabulary, as one ordered table rather than a chain of ifs.
+# The table exists because the upload page has to apply the SAME rules, and the
+# hand-written second copy it used to carry had drifted: the page told the reader
+# calib.nii.gz was an M0 while this function returned "other" and load_folder
+# silently dropped the file. web.py now generates its rules from
+# `role_vocabulary()`, so there is one vocabulary and it cannot drift again.
+#
+# "contains" = the token appears anywhere in the name; "starts" = the name begins
+# with it. Two orderings are load-bearing:
+#   * ASL before T1, so 'PCASL_T1corrected' is ASL — the modality token wins over
+#     a stray 't1'.
+#   * ASL before calib, and calib only as a PREFIX, because oxford_asl uses a
+#     trailing _calib to mean "calibrated": perfusion_calib and aCBV_calib are
+#     derived output maps, while a file NAMED calib/calibration is the calibration
+#     (M0) scan itself.
+_ROLE_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("m0",  "contains", ("m0",)),
+    ("asl", "contains", ("pcasl", "pasl", "asl", "perf", "cbf", "deltam", "delta_m",
+                         "pair", "control", "ctrl", "label", "tag", "subtract")),
+    ("asl", "starts",   ("con", "tag", "diff", "dm")),
+    ("m0",  "starts",   ("calib",)),
+    ("t1",  "contains", ("mprage", "t1", "anat", "struct")),
 )
 
 
-def classify_upload(filename: str) -> str:
-    """Infer what an uploaded NIfTI is, for the single drop zone.
+def classify_role(filename: str) -> str:
+    """Infer a file's role from its name: one of m0 / asl / t1 / other.
 
-    Richer than classify_role, which only separates asl / m0 / t1 for folder
-    scanning. Here a user drops everything at once and the form has to work out
-    which is the CBF map, which are tissue maps, and which are raw acquisition
-    files.
-
-    Returns one of: cbf, gm, wm, csf, asl, m0, t1, other.
-    """
-    name = filename.lower().rsplit("/", 1)[-1]
-    for role, tokens in _UPLOAD_ROLES:
-        if any(t in name for t in tokens):
+    Applies `_ROLE_RULES` in order; see the comment there for why the order and
+    the contains/starts distinction matter."""
+    name = filename.lower()
+    for role, how, tokens in _ROLE_RULES:
+        if any(name.startswith(t) if how == "starts" else t in name for t in tokens):
             return role
-    # a bare "t1.nii.gz" has no separator to match on
-    if name.startswith(("t1", "mprage")):
-        return "t1"
-    if name.startswith(("asl", "con", "tag", "diff", "dm")):
-        return "asl"
     return "other"
+
+
+def role_vocabulary() -> list[dict]:
+    """`_ROLE_RULES` as JSON-serialisable data.
+
+    This is how the upload page gets the rules: it applies exactly these instead
+    of a hand-written copy, and it lists them to the reader from the same source.
+    """
+    return [{"role": role, "how": how, "tokens": list(tokens)}
+            for role, how, tokens in _ROLE_RULES]
 
 
 def guess_vendor(text: str) -> str:

@@ -8,6 +8,7 @@ implementation is silently wrong on exactly the files this tool exists to read.
 """
 
 import gzip
+import re
 import threading
 import time
 import urllib.error
@@ -99,11 +100,71 @@ def test_upload_page_offers_the_v1_populations():
         assert f'value="{gone}"' not in page
 
 
-def test_upload_page_requires_the_cbf_map_only():
+def test_upload_page_states_the_minimum_inputs():
+    """"Which are the minimum inputs?" was a review question, and the page's answer
+    was wrong: it marked the CBF map "required". Stream A grades the raw acquisition
+    with no CBF map at all, so either input alone is enough and the page has to say
+    which."""
     page = _upload_page()
-    assert 'name="cbf"' in page and "required" in page
+    assert 'name="cbf"' in page and 'name="files"' in page
+    assert "Minimum inputs" in page
+    assert page.count("one of the two") == 2, "both alternatives must be marked as such"
     for optional in ("gm", "wm", "csf"):
         assert f'name="{optional}"' in page
+
+
+def _css_rules(page: str) -> list[tuple[str, str]]:
+    """(selector, declarations) for every flat rule in the page's <style>."""
+    css = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    return re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+
+
+def test_only_the_filename_hint_is_clipped_to_an_ellipsis():
+    """A reviewer's screenshot showed the raw zone reading "Each is recog…".
+
+    `.drop .txt small` set white-space:nowrap + text-overflow:ellipsis so that the
+    filename the JS swaps into the hint line cannot wrap. The zone's description
+    and the "same voxel grid" note sit in the same slot, so they were clipped to
+    one line too. The rule is scoped to the hint line rather than deleted - the
+    filename still must not wrap.
+    """
+    clipping = [sel.strip() for sel, decl in _css_rules(_upload_page())
+                if "white-space:nowrap" in decl.replace(" ", "").replace("\n", "")
+                and ".drop" in sel and "small" in sel]
+    assert clipping, "the filename hint lost its no-wrap protection"
+    for sel in clipping:
+        assert "[data-hint]" in sel, f"{sel} clips descriptive text as well"
+
+
+def test_an_unrecognised_filename_opens_the_per_role_boxes():
+    """role() tells the reader "use the boxes below". Those boxes are inside
+    <details id="byrole">, and "byrole" appeared nowhere in the script - so the
+    message pointed at something the reader could not see."""
+    script = _upload_page().split("<script>", 1)[1]
+    assert "byrole.open = true" in script
+    assert "classList.add('needed')" in script
+
+
+def test_the_page_states_which_filenames_are_recognised():
+    """"Indicate format of file name" - the zone said files are "recognised by
+    their filename" and then named not one token."""
+    page = _upload_page()
+    assert "Which filenames are recognised" in page
+    for token in ("pcasl", "m0", "calib", "mprage"):
+        assert token in page
+    # BIDS is recommended as canonical. That is only honest because BIDS names pass
+    # the classifier unchanged, which tests/test_filename_vocabulary.py asserts.
+    assert "sub-01_m0scan.nii.gz" in page
+
+
+def test_the_per_role_boxes_are_at_least_as_prominent_as_the_token_list():
+    """The vocabulary is a convenience and is necessarily incomplete, so the boxes
+    that need no filename at all must not read as the lesser option: they come
+    first, and they are styled up rather than down."""
+    page = _upload_page()
+    assert page.index('id="byrole"') < page.index('id="names"')
+    assert 'class="manual strong" id="byrole"' in page
+    assert ".manual.strong summary" in page
 
 
 def test_upload_page_renders_an_error_when_given_one():

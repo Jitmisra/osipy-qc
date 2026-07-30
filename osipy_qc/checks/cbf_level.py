@@ -22,7 +22,8 @@ import numpy as np
 from ..core.config import QCConfig
 from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
-from ..utils.masks import clean_nonfinite, covered_tissue_mask, coverage_fraction
+from ..utils.masks import (brain_mask_fallback, clean_nonfinite, coverage_fraction,
+                           covered_tissue_mask)
 
 
 def _gm_wm_values(cbf, gm, wm, cfg):
@@ -214,3 +215,105 @@ def deep_gm_ratio_check(cbf=None, deep_gm=None, cortical_gm=None,
     return CheckResult("3.4.deep_gm_ratio", Verdict.WARN, metric=metric,
                        reason=f"deep/cortical GM {ratio:.2f} outside the expected "
                               f"{cfg.deep_gm_ratio_lo}-{cfg.deep_gm_ratio_hi} band")
+
+
+@register_qc_check("3.5.brain_cbf", stream="B", required=False)
+def brain_cbf_check(cbf=None, gm=None, cfg: QCConfig = QCConfig(), **_) -> CheckResult:
+    """Whole-brain CBF over a self-derived mask. The only magnitude check that
+    runs when no tissue maps were supplied.
+
+    WHY THIS DOES NOT GRADE AGAINST A NORMAL RANGE
+    ----------------------------------------------
+    A mentor review asked for "an overall check of CBF brain values", because a
+    CBF map uploaded without tissue maps had nothing gradeable at all. The
+    obvious implementation - compare the brain mean against a normal band, the
+    way 3.1 compares GM - is not defensible, for two independent reasons.
+
+    1. No published bound exists. Every magnitude bound in the ASL literature is
+       stated for GREY MATTER (White Paper p.17: "gray matter CBF values from
+       40-100 ml/min/100ml can be normal") or for a RATIO (ASLPrep excludes
+       GM/WM < 1). A literature sweep found no paper, guideline or pipeline
+       stating an accept/reject band for whole-brain mean CBF. The published
+       "global" figures are also not this quantity: they are computed inside
+       parenchyma masks with CSF excluded, so a brain-mask mean that includes
+       ventricles reads systematically lower and cannot be compared to them.
+
+    2. The quantity is not stable. `brain_mask_fallback` thresholds at a
+       percentile, and on synthetic data the resulting mean moves 41 -> 60
+       mL/100g/min as that percentile goes 25 -> 75 - a spread of ~18, or nearly
+       a third of the width of any plausible band. A threshold on a number that
+       an internal knob moves that far is not measuring the scan.
+
+    So this check grades only what survives both objections: whether the map can
+    be a quantified CBF map AT ALL. On the same synthetic sweep the garbage case
+    is negative at every percentile (-32 to -15) while the clean case is positive
+    at every percentile, so the sign of the brain mean is robust to the mask in a
+    way its value is not. Gross mis-scaling is exactly the failure the White Paper
+    attributes to "a global reduction in labeling efficiency, or that the PD scan
+    used for normalization was incorrectly acquired or scaled" (p.17).
+
+    The mean itself is always reported, so a reader can judge it against their own
+    population - which is the honest division of labour when the field has not
+    published a bound.
+
+    Skipped (N/A) when tissue maps are present: 3.1 then grades GM and WM against
+    published bands, which is strictly better evidence, and two magnitude verdicts
+    on the same data would double-count one problem in the overall verdict.
+
+    KNOWN LIMITATION - it cannot tell CBF from arbitrary units
+    ----------------------------------------------------------
+    Nothing in a NIfTI states its units, so a raw deltaM or an un-quantified
+    perfusion-weighted map in scanner units is indistinguishable from CBF here.
+    Measured on the three real test datasets, raw ASL series give brain means of
+    191, 482 and 905 - the last two FAIL as implausible, which is the right answer
+    for the wrong reason, and the first PASSES at 191 while being no more a CBF map
+    than the others.
+
+    So a PASS from this check means "nothing about the magnitude rules out CBF",
+    NOT "this is quantified CBF". The check that establishes what a file actually
+    is, is 8.2.data_type, and the intended pipeline is that quantification happens
+    upstream. Do not tighten the upper bound to catch this: the overlap between
+    plausible CBF and plausible arbitrary units is real, and a tighter bound would
+    start failing genuine high-perfusion scans without reliably catching deltaM.
+    """
+    if cbf is None:
+        return CheckResult("3.5.brain_cbf", Verdict.UNKNOWN, reason="needs a CBF map")
+    if gm is not None:
+        return CheckResult("3.5.brain_cbf", Verdict.NA,
+                           reason="tissue maps supplied - 3.1 grades GM/WM against "
+                                  "published bands instead")
+
+    cbf_clean = clean_nonfinite(cbf)
+    brain = brain_mask_fallback(cbf_clean, cfg.brain_mask_percentile)
+    vals = cbf_clean[brain]
+    if vals.size == 0:
+        return CheckResult("3.5.brain_cbf", Verdict.UNKNOWN,
+                           reason="no non-zero voxels - cannot derive a brain mask")
+
+    mean = float(np.mean(vals))
+    median = float(np.median(vals))
+    neg_frac = float(np.mean(vals < 0))
+    metric = {
+        "mean_brain_cbf": round(mean, 2),
+        "median_brain_cbf": round(median, 2),
+        "negative_fraction": round(neg_frac, 4),
+        "n_voxels": int(vals.size),
+        # Named so nobody mistakes this for a tissue-segmented measurement, and
+        # so the percentile that produced it travels with the number.
+        "mask": f"self-derived (magnitude > p{cfg.brain_mask_percentile:g} of non-zero)",
+        "implausible_outside": [cfg.brain_cbf_absurd_lo, cfg.brain_cbf_absurd_hi],
+        "graded_against": "gross implausibility only - no published whole-brain band exists",
+    }
+
+    if mean <= cfg.brain_cbf_absurd_lo:
+        return CheckResult("3.5.brain_cbf", Verdict.FAIL, metric=metric, provisional=True,
+                           reason=f"whole-brain mean CBF {mean:.1f} is not positive - the map "
+                                  "cannot be quantified CBF (check labelling efficiency and "
+                                  "the M0/PD scaling)")
+    if mean >= cfg.brain_cbf_absurd_hi:
+        return CheckResult("3.5.brain_cbf", Verdict.FAIL, metric=metric, provisional=True,
+                           reason=f"whole-brain mean CBF {mean:.1f} exceeds {cfg.brain_cbf_absurd_hi:g} "
+                                  "- implies a scaling or unit error, not perfusion")
+    return CheckResult("3.5.brain_cbf", Verdict.PASS, metric=metric,
+                       reason=f"whole-brain mean CBF {mean:.1f} mL/100g/min over a self-derived "
+                              "mask - plausible as CBF; supply tissue maps for a graded level check")

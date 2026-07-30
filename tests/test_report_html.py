@@ -18,8 +18,9 @@ from osipy_qc import run_qc
 from osipy_qc.core.config import QCConfig, for_population
 from osipy_qc.report_html import render_html
 from osipy_qc.synth import synthetic_case
-from osipy_qc.utils.imaging import (colorise, encode_png, histogram_svg,
-                                    png_data_uri, slice_mosaic)
+from osipy_qc.utils.imaging import (colorbar_svg, colorise, encode_png,
+                                    format_level, histogram_svg, mosaic_window,
+                                    negative_colour, png_data_uri, slice_mosaic)
 
 
 # --------------------------------------------------------------------------- #
@@ -80,6 +81,44 @@ def test_slice_mosaic_accepts_4d_by_averaging():
 def test_slice_mosaic_survives_an_all_zero_volume():
     """A degenerate volume must not raise — a figure should never break a report."""
     assert slice_mosaic(np.zeros((4, 4, 3))).shape[2] == 3
+
+
+# --------------------------------------------------------------------------- #
+# Colour bar
+# --------------------------------------------------------------------------- #
+def test_colorbar_states_its_range_and_the_unit():
+    """From the 2026-07 review: "Color bar with units (ml/100g/min) is missing".
+    An unlabelled ramp cannot tell 60 from 600 — a healthy scan from a broken M0."""
+    svg = colorbar_svg(0.0, 80.0)
+    assert svg.startswith("<svg") and svg.endswith("</svg>")
+    assert "mL/100 g/min" in svg
+    assert ">0</text>" in svg and ">80</text>" in svg
+
+
+def test_colorbar_swatches_come_from_the_image_mapping():
+    """The bar is coloured by `colorise`, the same call that paints the mosaic, so
+    it cannot advertise a colour the image does not use: a window reaching below
+    zero shows the negative colour there, and one that does not, does not."""
+    assert negative_colour() in colorbar_svg(-8.0, 73.0)
+    assert negative_colour() not in colorbar_svg(0.0, 73.0)
+
+
+def test_colorbar_ticks_zero_when_the_window_reaches_below_it():
+    """Where impossible values stop is the most informative point on the scale."""
+    assert ">0</text>" in colorbar_svg(-8.0, 73.0)
+
+
+def test_colorbar_uses_literal_colours_not_css_variables():
+    """The bar is also served on its own as image/svg+xml, where a CSS variable
+    resolves to nothing — and a literal survives a print path that drops
+    backgrounds and re-declares every colour token."""
+    assert "var(--" not in colorbar_svg(-8.0, 73.0)
+
+
+def test_colorbar_degenerate_window_does_not_raise():
+    """A figure should never break a report."""
+    for lo, hi in [(0.0, 0.0), (5.0, 1.0), (float("nan"), 1.0)]:
+        assert colorbar_svg(lo, hi).startswith("<svg")
 
 
 # --------------------------------------------------------------------------- #
@@ -193,6 +232,64 @@ def test_check_cards_use_human_names_and_keep_the_id():
     r = CheckResult("1.qei", Verdict.PASS, metric={"qei": 0.8}, reason="ok")
     h = render_html(QCReport(Verdict.PASS, [r]), inputs={})
     assert ">QEI<" in h and "1.qei" in h
+
+
+def test_report_labels_the_mosaic_scale_with_this_scans_own_window():
+    """The window is per-scan, so the bar has to show *this* scan's range and the
+    report has to say it is autoscaled — otherwise two reports' colours look
+    comparable and are not."""
+    report, inputs = _demo_report()
+    lo, hi = mosaic_window(inputs["cbf"])
+    h = render_html(report, inputs=inputs)
+    assert "mL/100 g/min" in h
+    assert f"{format_level(lo)}&ndash;{format_level(hi)}" in h
+    assert "autoscaled to this scan" in h
+
+
+def test_every_mosaic_carries_a_scale():
+    """A figure copied out of the report still has to state what its colours mean,
+    so the bar goes on each mosaic rather than once per page."""
+    report, inputs = _demo_report()
+    h = render_html(report, inputs=inputs)
+    mosaics = len(set(re.findall(r'src="(data:image/png;base64,[^"]+)"', h)))
+    assert mosaics >= 2
+    assert h.count("<title>Colour scale,") == mosaics
+
+
+def test_mosaic_caption_names_the_colour_the_code_actually_paints():
+    """The caption said "Blue = negative CBF" while `colorise` paints cyan
+    (#3cc8e6) — and the ramp's own low end is a dark violet a reader reads as
+    blue, so the caption pointed at ordinary low-perfusion voxels."""
+    report, inputs = _demo_report()
+    h = render_html(report, inputs=inputs)
+    assert "Blue = negative CBF" not in h
+    assert f"cyan ({negative_colour()})" in h
+
+
+def test_both_mosaics_share_one_window_so_they_can_be_compared():
+    """The GM-masked mosaic used to autoscale itself, so one report showed the same
+    scan at two different apparent perfusion levels."""
+    report, inputs = _demo_report()
+    cbf, gm = np.asarray(inputs["cbf"], float), np.asarray(inputs["gm"], float)
+    lo, hi = mosaic_window(cbf)
+    overlay = np.where(gm > QCConfig().tissue_thresh, cbf, 0.0)
+    h = render_html(report, inputs=inputs)
+    assert png_data_uri(slice_mosaic(overlay, vmin=lo, vmax=hi)) in h
+
+
+def test_figures_do_not_leak_a_stray_angle_bracket():
+    """Wrapping a mosaic in its zoom link left the image tag's own closing ">"
+    behind, so a literal > rendered between every mosaic and its caption."""
+    report, inputs = _demo_report()
+    h = render_html(report, inputs=inputs)
+    assert "</a>>" not in h
+
+
+def test_report_uses_one_spelling_of_the_cbf_unit():
+    """Two spellings on one page reads as two different quantities."""
+    report, inputs = _demo_report()
+    h = render_html(report, inputs=inputs)
+    assert "mL/100g/min" not in h
 
 
 def test_report_shows_acquisition_params_or_says_not_provided():

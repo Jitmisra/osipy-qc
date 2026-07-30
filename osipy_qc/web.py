@@ -1,5 +1,5 @@
 """
-The frontend: upload a CBF map, get a report.
+The frontend: upload a scan, get a report.
 
 Why
 ---
@@ -8,7 +8,9 @@ uploading it right now? Just writing the Python command with flags?" A researche
 should not need the CLI to QC a scan.
 
 `osipy-qc serve` starts a local web app: drag in a CBF map (and, if you have
-them, the tissue maps), pick the population, get the full visual report back.
+them, the tissue maps) or the raw acquisition files, pick the population, get the
+full visual report back. Either input alone is enough — Stream A grades the raw
+acquisition and needs no CBF map, so the check set follows what was supplied.
 
 How, without dependencies
 -------------------------
@@ -95,6 +97,17 @@ _CONSOLE_CSS = """
 .manual{margin-top:1rem;border-top:1px solid var(--line);padding-top:.9rem}
 .manual summary{cursor:pointer;font-size:.85rem;color:var(--muted)}
 .manual summary:hover{color:var(--ink)}
+/* The per-role boxes need no filename at all, so they must not read as the
+   lesser option next to the token list. */
+.manual.strong summary{color:var(--accent-600);font-weight:600;font-size:.9rem}
+.manual.needed{border-top:2px solid var(--accent)}
+.manual .whynow{display:none}
+.manual.needed .whynow{display:block;color:var(--accent-600)}
+.names{display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem;font-size:.82rem;
+  margin:.6rem 0 0}
+.names b{font-weight:600}
+.names code{font-family:var(--mono);font-size:.76rem;color:var(--muted);
+  overflow-wrap:anywhere}
 
 .stage{max-width:760px;margin:0 auto;padding:1rem 1.5rem 4rem}
 .lede{text-align:center;margin:1.5rem 0 2rem}
@@ -120,8 +133,11 @@ form{margin-top:.5rem}
 .drop.filled .ic{background:#E1F3E9;color:var(--pass)}
 .drop .txt{flex:1;min-width:0}
 .drop .txt b{font-size:.94rem}
-.drop .txt small{display:block;color:var(--muted);font-size:.8rem;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
+.drop .txt small{display:block;color:var(--muted);font-size:.8rem}
+/* Only the hint line clips. The JS swaps that line for the chosen filename and a
+   long NIfTI name must not wrap — but descriptive text in the same slot has to,
+   or it reads as "Each is recog…", which is how a reviewer saw it. */
+.drop .txt small[data-hint]{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .drop .clear{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:0;background:none;
   cursor:pointer;padding:.2rem .4rem;display:none;z-index:2}
 .drop.filled .clear{display:inline}
@@ -187,6 +203,56 @@ def _threshold_groups() -> tuple[str, str]:
     return "".join(out), _json.dumps(defaults)
 
 
+#: role -> what the page calls it. Only the wording lives here; the vocabulary
+#: itself is `role_vocabulary()` in checks/schema.py. "other" is the escape-hatch
+#: message, and the JS opens the per-role boxes when it fires — a message pointing
+#: at a collapsed section the reader cannot see is not an instruction.
+_ROLE_LABELS = {
+    "m0": "M0",
+    "asl": "ASL series",
+    "t1": "structural",
+    "other": "name unclear — use the boxes below",
+}
+
+#: how a rule matches, in the reader's words
+_ROLE_MATCH = {"contains": "name contains", "starts": "name starts with"}
+
+
+def _role_rules() -> tuple[str, str, str]:
+    """(rules JSON, labels JSON, the accepted-filename disclosure).
+
+    All three are generated from the ONE vocabulary in checks/schema.py. The page
+    used to carry a hand-written copy of those rules and the two had drifted five
+    ways: it told the reader calib.nii.gz was an M0 while load_folder classified it
+    "other" and silently dropped the file, and it promised M0 for perfusion_calib,
+    which is a CBF map. Generating the JS from the Python table is what makes that
+    class of bug impossible rather than merely fixed.
+    """
+    import json as _json
+
+    from .checks.schema import role_vocabulary
+
+    vocab = role_vocabulary()
+    rows = "".join(
+        f'<b>{esc(_ROLE_LABELS[r["role"]])}</b>'
+        f'<span>{esc(_ROLE_MATCH[r["how"]])} <code>{esc(", ".join(r["tokens"]))}</code></span>'
+        for r in vocab
+    )
+    disclosure = (
+        '<details class="manual" id="names">'
+        '<summary>Which filenames are recognised</summary>'
+        '<p class="thr-note">The name is lower-cased and the <b>first rule that matches, '
+        'top to bottom, wins</b>. <b>BIDS names work unchanged</b> &mdash; '
+        '<code>sub-01_asl.nii.gz</code>, <code>sub-01_m0scan.nii.gz</code>, '
+        '<code>sub-01_T1w.nii.gz</code> &mdash; and BIDS is the naming to prefer. '
+        'This list is a convenience and is necessarily incomplete: a name that is not '
+        'here is not a problem, put the file in a box above and its name is ignored '
+        'entirely.</p>'
+        f'<div class="names">{rows}</div></details>'
+    )
+    return _json.dumps(vocab), _json.dumps(_ROLE_LABELS), disclosure
+
+
 def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
     req = " required" if required else ""
     return (
@@ -207,6 +273,7 @@ def _upload_page(error: str = "") -> str:
         for p in pops
     )
     thr_groups, thr_defaults = _threshold_groups()
+    role_rules, role_labels, name_help = _role_rules()
     err = f'<div class="err"><b>Could not grade that.</b> {esc(error)}</div>' if error else ""
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -216,14 +283,22 @@ def _upload_page(error: str = "") -> str:
 
 <div class="stage">
   <div class="lede">
-    <div class="eyebrow">CBF map &rarr; PASS / WARN / FAIL</div>
+    <div class="eyebrow">CBF map or raw ASL &rarr; PASS / WARN / FAIL</div>
     <h1>Grade an ASL scan</h1>
-    <p>Drop in a CBF map and get an interpretable quality report &mdash; a verdict per
-       check, with the reason and the reference behind every number.</p>
+    <p>Drop in a CBF map, the raw acquisition, or both, and get an interpretable quality
+       report &mdash; a verdict per check, with the reason and the reference behind every
+       number.</p>
   </div>
   {err}
+  <div class="note">
+    <b>Minimum inputs &mdash; either one is enough.</b> A <b>CBF map</b> grades the map
+    itself; the <b>raw acquisition files</b> grade the acquisition, with no CBF map
+    needed. Supply both and every check runs. Whatever you give, the report states how
+    many checks it could reach and which it could not.
+  </div>
   <form id="qc" method="post" action="/run" enctype="multipart/form-data">
-    <div class="field-label">CBF map <span class="req">required</span></div>
+    <div class="field-label">CBF map <span class="req">one of the two</span>
+      <span class="opt">QEI, noise, CBF level, coverage</span></div>
     {_dropzone("cbf", "Choose or drop a CBF map", "quantified CBF (mL/100g/min), NIfTI")}
 
     <div class="field-label">Tissue maps
@@ -236,8 +311,8 @@ def _upload_page(error: str = "") -> str:
         <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
     </div>
 
-    <div class="field-label">Raw acquisition
-      <span class="opt">optional &mdash; unlocks the schema, M0, motion and data-type checks</span></div>
+    <div class="field-label">Raw acquisition <span class="req">one of the two</span>
+      <span class="opt">schema, control/label, M0, motion, data type</span></div>
     <div class="drop dropall" id="zone">
       <input id="files" name="files" type="file" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream" multiple hidden>
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
@@ -245,7 +320,8 @@ def _upload_page(error: str = "") -> str:
       <div class="txt">
         <b>Drop the raw files here</b>
         <small>The ASL series, M0 and structural. Each is recognised by its filename;
-        if a name is unusual, use the boxes underneath instead.</small>
+        if a name is unusual, use the boxes underneath instead &mdash; they ignore the
+        name completely.</small>
         <div class="dropbtns">
           <button type="button" id="pickfiles" class="dbtn">Choose files&hellip;</button>
           <button type="button" id="pickdir" class="dbtn dbtn-alt">Choose a folder&hellip;</button>
@@ -254,8 +330,10 @@ def _upload_page(error: str = "") -> str:
       <div class="picked" id="picked"></div>
     </div>
 
-    <details class="manual" id="byrole">
+    <details class="manual strong" id="byrole">
       <summary>Or say what each file is &mdash; use this if a name is not recognised</summary>
+      <p class="thr-note whynow">Opened because a file above was not recognised from its
+        name. Put it in the box that matches and the name stops mattering.</p>
       <p class="thr-note">Nothing here depends on the filename. Whatever you put in a box is
         treated as that kind of file.</p>
       <div class="grid2">
@@ -264,6 +342,8 @@ def _upload_page(error: str = "") -> str:
         {_dropzone("raw_t1", "Structural", "T1 / MPRAGE")}
       </div>
     </details>
+
+    {name_help}
 
     <details class="manual">
       <summary>Thresholds &mdash; change what counts as a pass</summary>
@@ -337,24 +417,37 @@ def _upload_page(error: str = "") -> str:
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
   var zone = document.getElementById('zone');
-  // Mirrors classify_role in checks/schema.py. When these two disagree the page
-  // tells the reader their file is unusable while the server would have taken
-  // it — which is exactly what happened to a reviewer's conAFeHe73_1_pairs.nii.
+  // GENERATED from _ROLE_RULES in checks/schema.py, the same table classify_role
+  // walks. It used to be a hand-written copy, and the two drifted: this said
+  // calib.nii.gz was an M0 while the server classified it "other" and load_folder
+  // dropped the file without a word.
+  var ROLES = {role_rules};
+  var LABELS = {role_labels};
   function role(n){{
     n = n.toLowerCase();
-    if(/m0|calib/.test(n)) return 'M0';
-    if(/pcasl|pasl|asl|perf|cbf|deltam|delta_m|pair|control|ctrl|label|tag|subtract/.test(n)
-       || /^(con|tag|diff|dm)/.test(n)) return 'ASL series';
-    if(/mprage|t1|anat|struct/.test(n)) return 'structural';
-    return 'name unclear \u2014 use the boxes below';
+    for(var i=0;i<ROLES.length;i++){{
+      var r = ROLES[i];
+      for(var j=0;j<r.tokens.length;j++){{
+        var t = r.tokens[j];
+        if(r.how === 'starts' ? n.indexOf(t) === 0 : n.indexOf(t) >= 0) return LABELS[r.role];
+      }}
+    }}
+    return LABELS.other;
   }}
+  var byrole = document.getElementById('byrole');
   function show(src){{
     picked.innerHTML = '';
+    var unclear = 0;
     for(var i=0;i<src.files.length;i++){{
-      var f = src.files[i], s = document.createElement('span');
-      s.innerHTML = '<span>'+f.name+'</span><b>'+role(f.name)+'</b>';
+      var f = src.files[i], s = document.createElement('span'), lab = role(f.name);
+      if(lab === LABELS.other) unclear++;
+      s.innerHTML = '<span>'+f.name+'</span><b>'+lab+'</b>';
       picked.appendChild(s);
     }}
+    // That label says "use the boxes below", and the boxes sit in a collapsed
+    // <details> no code ever opened. Pointing a reader at something they cannot
+    // see is not an instruction, so opening it is what makes the sentence true.
+    if(unclear){{ byrole.open = true; byrole.classList.add('needed'); }}
   }}
   var folder = document.getElementById('folder');
   document.getElementById('pickfiles').addEventListener('click', function(ev){{
@@ -447,7 +540,19 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, byt
             # Single-file fields keep their (filename, bytes) shape so every
             # existing caller is unaffected.
             if name == "files":
-                out.setdefault("files_multi", []).append((filename or "", data))
+                # An UNFILLED file input still submits a part - empty filename,
+                # empty body - and `hidden` does not suppress it (only `disabled`
+                # would). The form carries two such inputs, the file picker and
+                # the folder picker, so a CBF-map-only upload arrived here as
+                # [('', b''), ('', b'')].
+                #
+                # Without this guard those phantom parts were written to disk as
+                # a 0-byte file, which set saved_raw=True, which ran all 18
+                # checks instead of the 9 the inputs justify, and then fabricated
+                # "no BIDS sidecar" and "no M0" WARNings about raw files the user
+                # never claimed to have. A good CBF map could not come back clean.
+                if data:
+                    out.setdefault("files_multi", []).append((filename or "", data))
             else:
                 out[name] = (filename or "", data)
     return out
@@ -473,6 +578,27 @@ def _remember_upload(subject) -> str:
     return token
 
 
+def _checks_for(has_cbf: bool, has_raw: bool) -> list[str]:
+    """The check set the supplied inputs justify.
+
+    Running the whole registry regardless is what made a flawless CBF map WARN:
+    ten Stream-A checks had nothing to look at. The set follows the inputs in BOTH
+    directions, which is the point — a raw-only upload must not be asked for a CBF
+    map either, and Stream A grades the acquisition without one.
+    """
+    from .batch import cbf_map_checks
+    from .core.registry import all_checks
+
+    if has_cbf and has_raw:
+        # 4.1 needs an ASL mask AND a structural mask, and no loader in the package
+        # produces either, so including it only ever reports a missing check that
+        # no upload can supply.
+        return [n for n in all_checks() if n != "4.1.coregistration"]
+    if has_raw:
+        return [n for n, e in all_checks().items() if e.get("stream") == "A"]
+    return cbf_map_checks()
+
+
 def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
     """Write the uploaded NIfTIs to a temp dir, grade them, return the payload.
 
@@ -483,7 +609,6 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
     """
     from .io import load_cbf_inputs
 
-    from .checks.schema import classify_upload
     cbf_name, cbf_bytes = fields.get("cbf", ("", b""))
 
     population = (fields.get("population", ("", b"adult"))[1] or b"adult").decode()
@@ -530,10 +655,20 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             return path
 
         paths = {k: _save(k) for k in ("cbf", "gm", "wm", "csf")}
-        if not paths["cbf"]:
-            raise ValueError("No CBF map was uploaded.")
-        inputs = load_cbf_inputs(paths["cbf"], gm=paths["gm"], wm=paths["wm"],
-                                 csf=paths["csf"])
+        if paths["cbf"]:
+            inputs = load_cbf_inputs(paths["cbf"], gm=paths["gm"], wm=paths["wm"],
+                                     csf=paths["csf"])
+        elif any(paths[k] for k in ("gm", "wm", "csf")):
+            # Never silently discard an uploaded file. Every Stream-B check reads
+            # the CBF map, so tissue maps on their own have nothing to be graded
+            # against, and a report that just omitted them would not say why.
+            raise ValueError(
+                "Tissue maps were uploaded without a CBF map, and they can only be "
+                "graded against one. Add the CBF map, or drop the raw acquisition "
+                "files to grade the acquisition instead.")
+        else:
+            # Stream A grades the raw acquisition and needs no CBF map at all.
+            inputs = {}
 
         # Raw acquisition files, if any were sent. These are what Stream A needs:
         # without them the schema, M0, motion and data-type checks have nothing
@@ -571,31 +706,27 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
                 fh.write(data)
             saved_raw = True
 
+        if not paths["cbf"] and not saved_raw:
+            raise ValueError("Nothing to grade - upload a CBF map, raw acquisition "
+                             "files, or both.")
+
         if saved_raw:
             from .io import load_folder
             # the CBF-derived inputs win where the two overlap; the raw folder
             # only adds what it alone can know
             inputs = {**load_folder(raw_dir), **inputs}
-        # Grade only what was actually supplied. Running the whole registry on a
-        # CBF map alone leaves ten Stream-A checks with nothing to look at; each
-        # returns UNKNOWN, and the overall verdict is dragged to WARN — so a
-        # flawless map could never PASS through this console. Verified: the clean
-        # synthetic case is WARN with every check and PASS with the CBF set.
-        from .batch import cbf_map_checks
-        if saved_raw:
-            from .core.registry import all_checks
-            # 4.1 needs an ASL mask and a structural mask, and no loader in the
-            # package produces either, so including it pins even a full raw
-            # upload at WARN.
-            checks = [n for n in all_checks() if n != "4.1.coregistration"]
-        else:
-            checks = cbf_map_checks()
-        report = run_qc(inputs, cfg=cfg, checks=checks)
+        report = run_qc(inputs, cfg=cfg,
+                        checks=_checks_for(bool(paths["cbf"]), saved_raw))
 
         from .api import subject_payload
         from .batch import Subject
+        # A raw-only upload has no CBF filename to be named after, so it falls back
+        # to the folder the browser said it came from, then to the first raw file.
+        # "uploaded scan" tells the reader nothing about which scan they are reading.
         sid = (os.path.basename(cbf_name)
                or os.path.basename(paths["cbf"] or "")
+               or client_dir
+               or (os.path.basename(raw_parts[0][0].replace("\\", "/")) if raw_parts else "")
                or "uploaded scan")
         subject = Subject(sid=sid, report=report, inputs=inputs, cfg=cfg)
         # hold the graded arrays briefly so /figure/ can render from them; the

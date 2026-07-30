@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Card, VerdictDot, VerdictPill, verdictOf } from '../lib/ui.jsx'
+import {
+  Card, CoverageMeter, NotGradedStrip, VerdictDot, VerdictPill, verdictGloss, verdictOf,
+} from '../lib/ui.jsx'
 
 /*
   One scan's report body.
@@ -9,13 +11,6 @@ import { Card, VerdictDot, VerdictPill, verdictOf } from '../lib/ui.jsx'
   diverge — an upload returned a server-built HTML document in a foreign
   stylesheet — which is how the product ended up with two designs at once.
 */
-
-const GLOSS = {
-  PASS: 'This scan looks usable. Every applicable check passed.',
-  WARN: 'Usable with caveats — one or more checks flagged something worth reviewing.',
-  FAIL: 'At least one check found a disqualifying problem. Inspect before using this scan.',
-  UNKNOWN: 'Not enough was provided to reach a verdict.',
-}
 
 /** The headline number a check produced, if it produced one worth showing. */
 function headline(check) {
@@ -172,8 +167,9 @@ export default function ScanReport({ data }) {
                 {data.verdict}
               </div>
               <p className="mt-1.5 text-[14.5px] text-[var(--color-muted)]">
-                {GLOSS[data.verdict] || ''}
+                {verdictGloss(data.verdict, data.coverage)}
               </p>
+              <CoverageMeter coverage={data.coverage} className="mt-2.5" />
             </div>
           </div>
 
@@ -200,6 +196,8 @@ export default function ScanReport({ data }) {
             ))}
           </div>
         )}
+
+        <NotGradedStrip coverage={data.coverage} checks={data.checks} />
       </Card>
 
       {Object.entries(byStream).map(([stream, checks]) => (

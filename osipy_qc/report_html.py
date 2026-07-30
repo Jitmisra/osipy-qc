@@ -33,7 +33,8 @@ import numpy as np
 
 from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
 from .core.config import QCConfig
-from .utils.imaging import histogram_svg, png_data_uri, slice_mosaic
+from .utils.imaging import (CBF_UNITS, colorbar_svg, format_level, histogram_svg,
+                            mosaic_window, negative_colour, png_data_uri, slice_mosaic)
 from .utils.masks import covered_tissue_mask
 
 # One-line plain-English gloss per overall verdict, shown in the hero.
@@ -283,7 +284,7 @@ def _kpi_tiles(by: dict[str, dict], cfg: QCConfig) -> str:
             f'<div class="foot">{esc(foot)}</div></div>'
         )
 
-    simple("3.1.cbf_level", "mean_gm_cbf", "GM CBF", "mL/100g/min",
+    simple("3.1.cbf_level", "mean_gm_cbf", "GM CBF", CBF_UNITS,
            foot=f"{cfg.population} band {cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g}")
     simple("3.2.gm_wm_ratio", "gm_wm_ratio", "GM / WM ratio", "", "{:.2f}",
            foot="normal ~2–4")
@@ -335,12 +336,27 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
     gm, wm = inputs.get("gm"), inputs.get("wm")
     figs: list[str] = []
 
+    # One window for every mosaic in the report, and it is stated on every one of
+    # them. Two pictures of the same scan that each autoscaled themselves read as
+    # two different perfusion levels, and an unlabelled ramp cannot tell 60 from
+    # 600 - the difference between a healthy scan and a broken M0 calibration.
+    # The bar is styled by the existing `figure svg` rule and carries literal
+    # colours, so it adds no token a print block would have to re-declare.
+    window: tuple[float, float] | None = None
     try:
+        window = mosaic_window(cbf)
+        lo, hi = window
         figs.append(
-            '<figure><img alt="Axial CBF slices, inferno colour map" '
-            'src="' + png_data_uri(slice_mosaic(cbf)) + '">'
-            '<figcaption>CBF map &mdash; evenly spaced axial slices. '
-            'Blue = negative CBF (non-physical &mdash; a noise / subtraction artefact).</figcaption></figure>'
+            '<figure><img alt="Axial CBF slices; dark to bright yellow is low to high CBF, '
+            'cyan is negative CBF" '
+            'src="' + png_data_uri(slice_mosaic(cbf, vmin=lo, vmax=hi)) + '">'
+            + colorbar_svg(lo, hi) +
+            '<figcaption>CBF map &mdash; evenly spaced axial slices; dark is low perfusion, '
+            f'bright yellow is high. Voxels below zero are painted cyan ({negative_colour()}): '
+            'negative CBF is non-physical, so it marks noise or a subtraction artefact. '
+            f'The window is autoscaled to this scan ({format_level(lo)}&ndash;{format_level(hi)} '
+            f'{CBF_UNITS}, the 2nd&ndash;98th percentile of its non-zero voxels), so the colours '
+            'are not comparable with another scan&rsquo;s.</figcaption></figure>'
         )
     except Exception as exc:
         figs.append(f'<figure><figcaption>CBF mosaic unavailable: {esc(exc)}</figcaption></figure>')
@@ -348,11 +364,11 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
     if gm is not None:
         try:
             vals = np.asarray(cbf, dtype=float)[covered_tissue_mask(cbf, gm, cfg.tissue_thresh)]
-            svg = histogram_svg(vals, label=f"GM CBF (mL/100g/min) - {cfg.population} band shaded",
+            svg = histogram_svg(vals, label=f"GM CBF ({CBF_UNITS}) - {cfg.population} band shaded",
                                 bands=[(cfg.gm_cbf_lo, cfg.gm_cbf_hi, "#CFEBDD")])
             figs.append(
                 f"<figure>{svg}<figcaption>Grey-matter CBF distribution. Shaded = expected "
-                f"{cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g} for <b>{esc(cfg.population)}</b>. "
+                f"{cfg.gm_cbf_lo:g}–{cfg.gm_cbf_hi:g} {CBF_UNITS} for <b>{esc(cfg.population)}</b>. "
                 "Blue bars are negative CBF.</figcaption></figure>"
             )
         except Exception as exc:
@@ -362,9 +378,14 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
             gm_arr, cbf_arr = np.asarray(gm, dtype=float), np.asarray(cbf, dtype=float)
             if gm_arr.shape == cbf_arr.shape:
                 overlay = np.where(gm_arr > cfg.tissue_thresh, cbf_arr, 0.0)
+                lo, hi = window if window is not None else (None, None)
+                bar = colorbar_svg(lo, hi) if window is not None else ""
                 figs.append(
-                    '<figure><img alt="GM-masked CBF" src="' + png_data_uri(slice_mosaic(overlay))
-                    + '"><figcaption>CBF inside the GM mask only. Gaps here mean the mask covers '
+                    '<figure><img alt="GM-masked CBF, on the same colour scale as the CBF map" '
+                    'src="' + png_data_uri(slice_mosaic(overlay, vmin=lo, vmax=hi))
+                    + '">' + bar
+                    + '<figcaption>CBF inside the GM mask only, on the same scale as the map '
+                      'above so the two can be compared. Gaps here mean the mask covers '
                       'voxels the ASL never imaged (see the Coverage check).</figcaption></figure>'
                 )
         except Exception as exc:
@@ -374,10 +395,10 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
         try:
             vals = np.asarray(cbf, dtype=float)[covered_tissue_mask(cbf, wm, cfg.tissue_thresh)]
             figs.append(
-                "<figure>" + histogram_svg(vals, label="WM CBF (mL/100g/min)",
+                "<figure>" + histogram_svg(vals, label=f"WM CBF ({CBF_UNITS})",
                                            bands=[(cfg.wm_cbf_lo, cfg.wm_cbf_hi, "#CFEBDD")])
                 + "<figcaption>White-matter CBF distribution. Shaded = expected "
-                  f"{cfg.wm_cbf_lo:g}–{cfg.wm_cbf_hi:g}.</figcaption></figure>"
+                  f"{cfg.wm_cbf_lo:g}–{cfg.wm_cbf_hi:g} {CBF_UNITS}.</figcaption></figure>"
             )
         except Exception as exc:
             figs.append(f'<figure><figcaption>WM histogram unavailable: {esc(exc)}</figcaption></figure>')
@@ -387,12 +408,13 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
     import re as _re
     panes: list[str] = []
     for i, fig in enumerate(figs):
-        m = _re.search(r'<img([^>]*?)src="([^"]+)"', fig)
+        # the closing ">" is part of the match, or it is left behind and renders as
+        # a literal ">" between the mosaic and its caption
+        m = _re.search(r'<img([^>]*?)src="([^"]+)">', fig)
         if not m:
             continue
         fid = f"fig{i}"
         figs[i] = fig.replace(m.group(0), f'<a href="#{fid}"><img{m.group(1)}src="{m.group(2)}"></a>', 1)
-        figs[i] = figs[i].replace("</a>", "</a>", 1)
         panes.append(f'<a class="lb" id="{fid}" href="#_"><img alt="" src="{m.group(2)}"></a>')
 
     return ('<div class="section-title">Images</div><div class="gallery">'
@@ -407,7 +429,7 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
 # screen agree on what the headline is.
 _HEADLINE: tuple[tuple[str, str], ...] = (
     ("qei", ""), ("sCoV_pct", "%"), ("spatial_snr", ""), ("gm_wm_ratio", ""),
-    ("mean_gm_cbf", "mL/100g/min"), ("gm_coverage", "%"), ("negGM_fraction", ""),
+    ("mean_gm_cbf", CBF_UNITS), ("gm_coverage", "%"), ("negGM_fraction", ""),
     ("dice", ""), ("mean_fwd_mm", "mm"), ("skewness", ""),
 )
 

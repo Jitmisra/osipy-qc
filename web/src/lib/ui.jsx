@@ -83,6 +83,113 @@ export function VerdictDot({ verdict, title, size = 16 }) {
   )
 }
 
+/*
+  Coverage — the qualifier that keeps a verdict honest.
+
+  A check with no input to look at no longer escalates the verdict, so "PASS on
+  8 of 9 checks" and "PASS on 1 of 9" both print a bare PASS. The second is a
+  far weaker claim. Everything below exists so the difference is visible without
+  reading a single check, and the rule is: wherever a verdict is shown, show
+  this next to it.
+*/
+
+const GLOSS = {
+  PASS: 'This scan looks usable. Every applicable check passed.',
+  WARN: 'Usable with caveats — one or more checks flagged something worth reviewing.',
+  FAIL: 'At least one check found a disqualifying problem. Inspect before using this scan.',
+  UNKNOWN: 'Not enough was provided to reach a verdict.',
+}
+
+/*
+  When checks were left ungraded the verdict describes a subset, so the sentence
+  beside it must not describe the whole scan. "Every applicable check passed" is
+  the one that goes wrong: it quietly counts a check that had no input as
+  inapplicable, which is the exact confusion the aggregation change removed from
+  the verdict. It must not reappear in the prose.
+*/
+const PARTIAL_GLOSS = {
+  PASS: 'Nothing was wrong with the checks that ran — but some had no input to look at, so this is a partial pass.',
+  WARN: 'Of the checks that ran, one or more flagged something worth reviewing. Others had no input to look at.',
+  FAIL: 'A check that ran found a disqualifying problem, and that holds whatever else is missing.',
+  UNKNOWN: 'Not enough was supplied to judge this scan. Nothing was measured, so nothing failed either.',
+}
+
+export const verdictGloss = (verdict, coverage) =>
+  (coverage?.complete === false ? PARTIAL_GLOSS : GLOSS)[verdict] || ''
+
+/**
+ * How much of the report was decided, as one cell per check.
+ *
+ * One cell per check rather than a percentage fill: the counts are small enough
+ * to count off (7 to 18), and a continuous bar invites being read as a score.
+ * The cells are achromatic on purpose — coverage is not a status, and a second
+ * coloured bar beside the verdict would read as a second verdict.
+ */
+export function CoverageMeter({ coverage, className = '' }) {
+  if (!coverage?.total) return null
+  const { graded, total, unknown } = coverage
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 ${className}`}>
+      {/* the bar restates the sentence beside it, so it carries no label of its own */}
+      <span aria-hidden="true" className="flex h-2 w-[104px] flex-none gap-[2px]">
+        {Array.from({ length: total }, (_, i) => (
+          // two tones, 3.16:1 apart at worst (light and print; dark is 3.73:1),
+          // and both tagged as meter ink so print keeps them. An ungraded cell
+          // drawn as an outline instead would collapse into a smudge as soon as
+          // a raw-stream report puts 18 cells in 104px.
+          <span
+            key={i}
+            data-meter-fill=""
+            className="h-full flex-1 rounded-[1px]"
+            style={{ background: i < graded ? 'var(--color-muted)' : 'var(--color-line-strong)' }}
+          />
+        ))}
+      </span>
+      <span className="text-[12.5px] text-[var(--color-muted)]">
+        <b className="num font-semibold text-[var(--color-ink)]">{graded} of {total}</b> checks graded
+        {/* when nothing graded at all the strip below says so in full */}
+        {graded > 0 && unknown > 0 && ` · ${unknown} had no input to look at`}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Which checks were not graded, named — as a footer strip on the verdict hero.
+ *
+ * Named rather than hidden behind a disclosure: a reviewer should not have to
+ * click to find out what the report never looked at. Each chip links to that
+ * check's own card, which already states what it needed, so the requirement is
+ * written once.
+ */
+export function NotGradedStrip({ coverage, checks }) {
+  if (coverage?.complete !== false) return null
+  const byId = new Map((checks || []).map((c) => [c.id, c]))
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-[var(--color-line)] bg-[var(--color-well)] px-7 py-3">
+      <span className="text-[13px] text-[var(--color-muted)]">
+        {coverage.graded === 0
+          ? 'Nothing could be graded — every check needed an input that was not supplied'
+          : 'Not graded — these had no input to look at'}
+      </span>
+      {coverage.missing.map((id) => {
+        const c = byId.get(id)
+        return (
+          <a
+            key={id}
+            href={`#chk-${id.replace(/\./g, '-')}`}
+            title={c?.reason}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-surface)] px-2.5 py-1 text-[13px] font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-accent-050)]"
+          >
+            <VerdictDot verdict="UNKNOWN" size={12} />
+            {c?.label || id}
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
 export function Card({ className = '', interactive, children, ...rest }) {
   return (
     <div className={`panel ${interactive ? 'panel--link' : ''} ${className}`} {...rest}>

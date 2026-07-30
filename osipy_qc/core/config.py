@@ -91,6 +91,19 @@ class QCConfig:
     neg_gm_warn: float = 0.10       # UNCALIBRATED
     neg_gm_fail: float = 0.20       # UNCALIBRATED
 
+    # Whole-brain plausibility (3.5) - the ONLY magnitude bounds available when
+    # no tissue maps were supplied. Deliberately absurd rather than normal: see
+    # the long comment on check 3.5 in checks/cbf_level.py. These do NOT encode
+    # "what healthy CBF looks like" - 3.1 does that, from published GM bands.
+    # They encode "this cannot be a quantified CBF map at all", which is the only
+    # claim a self-derived brain mask can support.
+    brain_cbf_absurd_lo: float = 0.0    # UNCALIBRATED - a negative brain mean is non-physical
+    brain_cbf_absurd_hi: float = 300.0  # UNCALIBRATED - ~3x the top of the published GM band
+    # The percentile brain_mask_fallback thresholds at. Exposed because it moves
+    # the reported mean substantially (41 -> 60 on synthetic data across 25 -> 75),
+    # which is precisely why 3.5 does not grade that mean against a normal band.
+    brain_mask_percentile: float = 50.0  # UNCALIBRATED
+
     # Deep-GM vs cortical-GM (neonatal). In newborns CBF is HIGHER in deep grey
     # matter than cortical grey matter - the reverse of the adult pattern - so a
     # low ratio here is itself a red flag for a neonate.
