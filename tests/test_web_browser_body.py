@@ -256,3 +256,63 @@ def test_tissue_maps_without_a_cbf_map_are_not_silently_dropped(clean_case):
         _grade(_browser_body({"gm": _nifti_bytes(clean_case.gm),
                               "wm": _nifti_bytes(clean_case.wm)}))
     assert "without a CBF map" in str(exc.value)
+
+
+# --------------------------------------------------------------------------
+# BIDS sidecars must survive the upload round-trip (OSIPI Challenge data)
+# --------------------------------------------------------------------------
+
+def test_sidecars_survive_the_upload_round_trip(raw_series):
+    """Three blockers used to stand between an uploaded sidecar and load_folder:
+    the folder-picker JS dropped non-NIfTIs, the accept attribute refused them,
+    and the server renamed sub-01_asl.json to sub-01_asl.json.nii.gz - hiding the
+    metadata AND handing JSON bytes to nib.load. This exercises the server half
+    with the body a browser sends."""
+    import json as _j
+    asl_json = _j.dumps({"Manufacturer": "Philips", "MRAcquisitionType": "2D",
+                         "ArterialSpinLabelingType": "PCASL",
+                         "PostLabelingDelay": 1.8}).encode()
+    m0_json = _j.dumps({"RepetitionTimePreparation": 10.0}).encode()
+    ctx = ("volume_type\n" + "control\nlabel\n" * 8).encode()
+    data = _grade(_browser_body({}, raw={
+        "sub-01_asl.nii.gz": raw_series,
+        "sub-01_asl.json": asl_json,
+        "sub-01_m0scan.json": m0_json,
+        "sub-01_aslcontext.tsv": ctx,
+    }))
+    ids = {c["id"]: c for c in data["checks"]}
+    assert ids["5.1.schema"]["verdict"] == "PASS", (
+        f"sidecar did not reach the grader: {ids['5.1.schema']['reason']}")
+    assert ids["6.2.m0_tr"]["verdict"] == "PASS"       # TR 10s from m0scan.json
+    assert "Philips" in ids["8.2.data_type"]["reason"]
+    assert ids["5.2.volume_integrity"]["verdict"] == "PASS"   # 16 rows == 16 vols
+
+
+def test_aslcontext_that_contradicts_the_series_fails(raw_series):
+    """A context file listing a different volume count than the series holds is a
+    truncated export or the wrong file - pairing cannot be trusted."""
+    ctx = ("volume_type\n" + "control\nlabel\n" * 5).encode()   # 10 rows, 16 vols
+    data = _grade(_browser_body({}, raw={
+        "sub-01_asl.nii.gz": raw_series,
+        "sub-01_aslcontext.tsv": ctx,
+    }))
+    ids = {c["id"]: c for c in data["checks"]}
+    assert ids["5.2.volume_integrity"]["verdict"] == "FAIL"
+    assert "aslcontext" in ids["5.2.volume_integrity"]["reason"]
+
+
+def test_uppercase_sidecar_does_not_kill_the_upload(raw_series):
+    """The JS folder filter admits SUB01_ASL.JSON case-insensitively, but the
+    server's extension check was case-sensitive: it appended .nii.gz, nib.load
+    then crashed on JSON bytes, and the whole upload died. The extension is now
+    matched case-insensitively and normalised to lowercase."""
+    import json as _j
+    asl_json = _j.dumps({"Manufacturer": "Philips", "MRAcquisitionType": "2D",
+                         "ArterialSpinLabelingType": "PCASL",
+                         "PostLabelingDelay": 1.8}).encode()
+    data = _grade(_browser_body({}, raw={
+        "sub-01_asl.nii.gz": raw_series,
+        "SUB01_ASL.JSON": asl_json,
+    }))
+    ids = {c["id"]: c for c in data["checks"]}
+    assert ids["5.1.schema"]["verdict"] == "PASS", ids["5.1.schema"]["reason"]

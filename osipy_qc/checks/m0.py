@@ -48,11 +48,26 @@ def m0_tr_check(m0_tr_s: float | None = None, cfg: QCConfig = QCConfig(), **_) -
 
 
 @register_qc_check("6.3.m0_no_bs", stream="A", required=True)
-def m0_no_bs_check(m0_background_suppression: bool | None = None, **_) -> CheckResult:
+def m0_no_bs_check(m0_background_suppression: bool | None = None,
+                   m0_sidecar: dict | None = None, **_) -> CheckResult:
     """The M0 must be acquired WITHOUT background suppression (BS crushes the tissue
-    signal M0 is meant to measure -> CBF over-estimated)."""
+    signal M0 is meant to measure -> CBF over-estimated).
+
+    Deliberately does NOT fall back to the ASL sidecar's BackgroundSuppression:
+    that field describes the ASL pairs, where BS is expected ON - the exact
+    opposite of the M0 rule. On the OSIPI Challenge data the ASL sidecar says
+    true; inheriting it would FAIL a perfectly ordinary M0. UNKNOWN is the honest
+    verdict when the M0's own metadata is silent; only the reason says how silent.
+    """
     if m0_background_suppression is None:
-        return CheckResult("6.3.m0_no_bs", Verdict.UNKNOWN, reason="M0 BS status unknown")
+        if m0_sidecar:
+            return CheckResult(
+                "6.3.m0_no_bs", Verdict.UNKNOWN,
+                reason="M0 sidecar present but does not state BackgroundSuppression - "
+                       "not inherited from the ASL sidecar (opposite rule: BS must be "
+                       "OFF for M0, is expected ON for ASL)")
+        return CheckResult("6.3.m0_no_bs", Verdict.UNKNOWN,
+                           reason="M0 BS status unknown (no M0 metadata)")
     if m0_background_suppression:
         return CheckResult("6.3.m0_no_bs", Verdict.FAIL,
                            reason="M0 acquired WITH background suppression - invalid calibration")

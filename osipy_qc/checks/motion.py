@@ -49,16 +49,31 @@ def framewise_displacement(motion_params: np.ndarray, radius_mm: float = 50.0) -
 
 
 def dvars(series_4d: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    """DVARS series (length T-1): RMS over voxels of the frame-to-frame difference."""
+    """DVARS series (length T-1): RMS over voxels of the frame-to-frame difference.
+
+    NaN-robust over the voxel axis: the RMS is taken over the finite differences
+    only. Digital phantoms (the OSIPI Challenge DROs) mask their background with
+    NaN, and under a plain mean those 5.5% of voxels poisoned the RMS of every
+    frame pair - four subjects came back "insufficient data" with 59 perfectly
+    measurable volumes on disk. A NaN voxel carries no signal; a NaN VOLUME still
+    does the right thing, because its frame pairs have no finite voxels at all
+    and stay NaN for the caller to filter.
+    """
     arr = np.asarray(series_4d, dtype=float)
     if arr.ndim != 4 or arr.shape[3] < 2:
         return np.array([])
     diff = np.diff(arr, axis=3)               # (..., T-1)
     if mask is not None:
         m = np.asarray(mask, dtype=bool)
-        flat = diff[m]                        # (n_vox, T-1)
-        return np.sqrt(np.mean(flat ** 2, axis=0))
-    return np.sqrt(np.mean(diff ** 2, axis=(0, 1, 2)))
+        diff = diff[m]                        # (n_vox, T-1)
+    else:
+        diff = diff.reshape(-1, diff.shape[3])
+    finite = np.isfinite(diff)
+    n = finite.sum(axis=0)                    # finite voxels per frame pair
+    sq_sum = np.where(finite, diff, 0.0).__pow__(2).sum(axis=0)
+    out = np.sqrt(sq_sum / np.where(n > 0, n, 1))
+    out[n == 0] = np.nan                      # a frame pair with no finite voxels
+    return out
 
 
 @register_qc_check("7.1.motion", stream="A", required=True)
@@ -127,11 +142,28 @@ def motion_check(motion_params=None, asl_4d=None, brain=None,
                 reason = f"mean FWD {mean_fwd:.3f} mm ({n_censor}/{fwd.size} frames over censor line)"
 
     if asl_4d is not None:
-        dv = dvars(asl_4d, brain)
+        arr = np.asarray(asl_4d, dtype=float)
+        nonfinite_frac = float(np.count_nonzero(~np.isfinite(arr))) / arr.size if arr.size else 0.0
+        if nonfinite_frac:
+            metric["nonfinite_voxel_fraction"] = round(nonfinite_frac, 4)
+        dv = dvars(arr, brain)
         dv = dv[np.isfinite(dv)] if dv.size else dv
         if dv.size:
             metric["mean_dvars"] = round(float(dv.mean()), 4)
             if verdict == Verdict.UNKNOWN:   # no motion params -> report DVARS, no hard verdict
-                verdict, reason = Verdict.INFO, f"mean DVARS {dv.mean():.2f} (no motion params for FWD)"
+                excl = f", {nonfinite_frac*100:.1f}% non-finite voxels excluded" if nonfinite_frac else ""
+                verdict, reason = Verdict.INFO, (f"mean DVARS {dv.mean():.2f} "
+                                                 f"(no motion params for FWD{excl})")
+        elif verdict == Verdict.UNKNOWN:
+            # name the actual cause: dvars() also returns empty for a series
+            # with fewer than 2 volumes, and a NaN slab in a single-volume file
+            # used to be misdiagnosed as "entirely non-finite"
+            if arr.ndim != 4 or arr.shape[3] < 2:
+                reason = "series has fewer than 2 volumes - DVARS needs a frame pair"
+            elif nonfinite_frac:
+                # covers both the all-NaN series and the pathological case where
+                # every frame pair is non-finite despite finite voxels existing
+                reason = ("DVARS cannot be computed - no frame pair has finite voxels "
+                          f"({nonfinite_frac*100:.0f}% of the series is non-finite)")
 
     return CheckResult("7.1.motion", verdict, metric=metric, reason=reason)

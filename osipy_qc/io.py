@@ -8,6 +8,7 @@ motion checks can run.
 from __future__ import annotations
 
 import glob
+import json
 import os
 
 import nibabel as nib
@@ -47,6 +48,91 @@ def _find_niftis(folder: str) -> list[str]:
     return out
 
 
+def _shared_prefix(a: str, b: str) -> int:
+    """Length of the shared leading run of two basenames, case-insensitive.
+
+    BIDS entity naming makes this a pairing key for free: sub-01_run-1_asl.nii.gz
+    shares 'sub-01_run-1_' with its own sidecars and only 'sub-01_run-' with the
+    other run's."""
+    a, b = a.lower(), b.lower()
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _find_sidecars(folder: str, asl_name: str = "", m0_name: str = "") -> tuple[dict, dict, list[str]]:
+    """Read the BIDS metadata sitting beside the images.
+
+    The three datasets this loader was first written against had none of this -
+    no JSON, no aslcontext - which is why everything downstream was built to
+    infer from shape and filename. The OSIPI ASL Challenge data does have it, and
+    inference then produced answers that were merely plausible: it read a Philips
+    2D acquisition as 3D from the slice thickness, while `MRAcquisitionType: "2D"`
+    sat unread in the file next to it.
+
+    So: read what is stated, and let the caller prefer it over the guess.
+
+    Pairing: every candidate is collected, then the one whose name shares the
+    longest prefix with the NIfTI actually loaded (`asl_name` / `m0_name`) wins.
+    The first version used first-wins for JSON but last-wins for the TSV, and no
+    pairing at all - so a recursed folder holding two individually valid subjects
+    graded sub-01's image against sub-02's aslcontext and manufactured a 5.2 FAIL
+    out of two clean runs. Ties (empty target, equal prefixes) fall back to walk
+    order, which is deterministic. Among ASL sidecars, one that actually states
+    ArterialSpinLabelingType outranks a name-only match, so a derivative cbf.json
+    cannot shadow the real asl.json. M0 sidecars are routed by the same
+    classify_role vocabulary as the images - the hand-rolled substring test it
+    replaces missed M0.json and calib.json, dropping a stated TR on the floor.
+
+    Returns (asl_sidecar, m0_sidecar, aslcontext_rows). Any of them may be empty -
+    absent metadata is still the common case, not an error.
+    """
+    asl_c: list[tuple[str, dict]] = []
+    m0_c: list[tuple[str, dict]] = []
+    ctx_c: list[tuple[str, list[str]]] = []
+
+    for root, _dirs, files in os.walk(folder):
+        for f in sorted(files):
+            if f.startswith("."):
+                continue
+            path = os.path.join(root, f)
+            low = f.lower()
+            try:
+                if low.endswith(".json"):
+                    with open(path) as fh:
+                        data = json.load(fh)
+                    if not isinstance(data, dict):
+                        continue
+                    role = classify_role(f)
+                    if role == "m0":
+                        m0_c.append((f, data))
+                    elif role == "asl" or "ArterialSpinLabelingType" in data:
+                        asl_c.append((f, data))
+                elif "aslcontext" in low and low.endswith(".tsv"):
+                    with open(path) as fh:
+                        lines = [ln.strip() for ln in fh if ln.strip()]
+                    # first line is the column header in a well-formed file
+                    if lines and lines[0].lower().startswith("volume_type"):
+                        lines = lines[1:]
+                    ctx_c.append((f, lines))
+            except (OSError, ValueError):
+                # a malformed sidecar must degrade to "no metadata", never crash
+                # the whole run - the images are still gradeable without it
+                continue
+
+    asl_json = max(asl_c, key=lambda c: ("ArterialSpinLabelingType" in c[1],
+                                         _shared_prefix(c[0], asl_name)),
+                   default=("", {}))[1] if asl_c else {}
+    m0_json = max(m0_c, key=lambda c: _shared_prefix(c[0], m0_name),
+                  default=("", {}))[1] if m0_c else {}
+    rows = max(ctx_c, key=lambda c: _shared_prefix(c[0], asl_name),
+               default=("", []))[1] if ctx_c else []
+    return asl_json, m0_json, rows
+
+
 def load_folder(folder: str, load_arrays: bool = True) -> dict:
     """Build an `inputs` dict for run_qc from a folder of NIfTIs."""
     paths = _find_niftis(folder)
@@ -62,6 +148,38 @@ def load_folder(folder: str, load_arrays: bool = True) -> dict:
 
     context = os.path.basename(folder.rstrip("/"))
     detected = detect_dataset(files, context)
+    asl_files = [f for f in files if classify_role(f["name"]) == "asl"]
+    m0_files = [f for f in files if classify_role(f["name"]) == "m0"]
+
+    # ---- stated metadata beats inferred metadata --------------------------
+    # detect_dataset guesses from shape and filename because that is all the
+    # first three datasets offered. Where a sidecar states a field outright,
+    # the guess is overwritten - a guess that lands on the right answer is
+    # still a guess, and here one landed on the wrong one.
+    #
+    # Types are enforced field by field, because a wrong type is worse than an
+    # absent field: BackgroundSuppression stated as the STRING "no" is truthy,
+    # and it silently switched the required swap check off with a reason
+    # claiming BS was on. A field of the wrong type degrades to "not stated".
+    asl_json, m0_json, aslcontext = _find_sidecars(
+        folder,
+        asl_name=asl_files[0]["name"] if asl_files else "",
+        m0_name=m0_files[0]["name"] if m0_files else "")
+    if asl_json:
+        for key, field in (("vendor", "Manufacturer"),
+                           ("readout", "MRAcquisitionType"),
+                           ("labelling", "ArterialSpinLabelingType")):
+            val = asl_json.get(field)
+            if isinstance(val, str) and val.strip():
+                detected[key] = val
+        if isinstance(asl_json.get("BackgroundSuppression"), bool):
+            detected["background_suppression"] = asl_json["BackgroundSuppression"]
+        detected["source"] = "BIDS sidecar"
+        if isinstance(asl_json.get("M0Type"), str):
+            # BIDS spells it "Separate"/"Included"/"Absent"/"Estimate"
+            detected["m0"] = asl_json["M0Type"].lower()
+    else:
+        detected["source"] = "inferred from NIfTI shape + filenames"
 
     inputs: dict = {
         "files": files,
@@ -72,8 +190,29 @@ def load_folder(folder: str, load_arrays: bool = True) -> dict:
         "m0_type": detected["m0"],
     }
 
-    asl_files = [f for f in files if classify_role(f["name"]) == "asl"]
-    m0_files = [f for f in files if classify_role(f["name"]) == "m0"]
+    if asl_json:
+        inputs["sidecar"] = asl_json
+    if m0_json:
+        inputs["m0_sidecar"] = m0_json
+        # The White Paper TR rule is about the M0's OWN repetition time, so it
+        # is read from the M0 sidecar and never from the ASL one.
+        tr = m0_json.get("RepetitionTimePreparation", m0_json.get("RepetitionTime"))
+        # BIDS allows a per-volume array here; the White Paper rule cares about
+        # full relaxation, so the SHORTEST TR is the one to grade.
+        if isinstance(tr, list) and tr and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in tr):
+            tr = min(tr)
+        # bool is an int in Python: "RepetitionTimePreparation": true would
+        # otherwise fabricate a confident 1.0 s TR out of a type error
+        if isinstance(tr, (int, float)) and not isinstance(tr, bool):
+            inputs["m0_tr_s"] = float(tr)
+        if isinstance(m0_json.get("BackgroundSuppression"), bool):
+            inputs["m0_background_suppression"] = m0_json["BackgroundSuppression"]
+    if aslcontext:
+        # the rows only - 5.2 derives its counts from them, and only when there
+        # is an actual series to hold them against
+        inputs["aslcontext_rows"] = aslcontext
+
     if asl_files:
         inputs["asl_shape"] = asl_files[0]["shape"]
         inputs["voxel_mm"] = asl_files[0]["voxel_mm"]

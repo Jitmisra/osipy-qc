@@ -67,3 +67,47 @@ def test_dvars_from_series():
 
 def test_motion_missing_input_unknown():
     assert motion_check().verdict == Verdict.UNKNOWN
+
+
+# --------------------------------------------------------------------------- #
+# NaN-robust DVARS (OSIPI Challenge DROs mask their background with NaN;
+# 5.5% NaN voxels used to poison the RMS of every frame pair -> UNKNOWN
+# "insufficient data" on 59 measurable volumes)
+# --------------------------------------------------------------------------- #
+def test_dvars_ignores_nan_background():
+    rng = np.random.default_rng(1)
+    series = 100.0 + rng.normal(0, 5.0, (6, 6, 6, 8))
+    nan_mask = np.zeros((6, 6, 6), dtype=bool)
+    nan_mask[0, :, :] = True                      # a NaN "background" slab
+    masked = series.copy()
+    masked[nan_mask, :] = np.nan
+    dv = dvars(masked)
+    assert dv.shape == (7,) and np.all(np.isfinite(dv))
+    # must equal DVARS computed over only the finite voxels
+    expected = dvars(series, mask=~nan_mask)
+    assert np.allclose(dv, expected)
+
+
+def test_dvars_mask_path_is_also_nan_robust():
+    rng = np.random.default_rng(2)
+    series = 100.0 + rng.normal(0, 5.0, (5, 5, 5, 6))
+    series[0, 0, 0, :] = np.nan                   # one NaN voxel INSIDE the mask
+    dv = dvars(series, mask=np.ones((5, 5, 5), dtype=bool))
+    assert np.all(np.isfinite(dv))
+
+
+def test_motion_info_notes_nan_exclusion():
+    rng = np.random.default_rng(3)
+    series = 100.0 + rng.normal(0, 5.0, (6, 6, 6, 8))
+    series[0, :, :, :] = np.nan
+    r = motion_check(asl_4d=series)
+    assert r.verdict == Verdict.INFO
+    assert "non-finite voxels excluded" in r.reason
+    assert r.metric["nonfinite_voxel_fraction"] > 0
+
+
+def test_motion_all_nan_series_honest_unknown():
+    r = motion_check(asl_4d=np.full((4, 4, 4, 6), np.nan))
+    assert r.verdict == Verdict.UNKNOWN
+    # "insufficient data" would be false - the data is present but unusable
+    assert "non-finite" in r.reason

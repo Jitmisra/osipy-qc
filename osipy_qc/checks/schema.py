@@ -134,13 +134,27 @@ def detect_dataset(files: list[dict], context: str = "") -> dict:
 
 
 @register_qc_check("8.2.data_type", stream="A", required=False)
-def data_type_check(files=None, context: str = "", **_) -> CheckResult:
-    """Routing/INFO check: classify the dataset so later checks can be gated."""
-    if not files:
+def data_type_check(files=None, context: str = "", detected: dict | None = None,
+                    **_) -> CheckResult:
+    """Routing/INFO check: classify the dataset so later checks can be gated.
+
+    Prefers the `detected` the loader already built, because that one has had any
+    BIDS sidecar folded over the top of it. Re-deriving here would throw the
+    stated metadata away and report the guess instead - which is how a Philips 2D
+    acquisition came back as "unknown 3D" with `Manufacturer` and
+    `MRAcquisitionType` sitting unread in the folder.
+    """
+    # merge over a fresh derivation rather than trusting `detected` to be
+    # complete: run_qc documents it as a caller-suppliable key, and a partial
+    # dict used to KeyError here - demoting INFO to UNKNOWN "check error"
+    base = detect_dataset(files, context) if files else {}
+    det = {**base, **(detected or {})}
+    if not det:
         return CheckResult("8.2.data_type", Verdict.UNKNOWN, reason="no files to inspect")
-    det = detect_dataset(files, context)
+    src = det.get("source", "inferred")
     return CheckResult("8.2.data_type", Verdict.INFO, metric=det,
-                       reason=f"{det['vendor']} {det['readout']} {det['structure']}")
+                       reason=f"{det.get('vendor', 'unknown')} {det.get('readout', 'unknown')} "
+                              f"{det.get('structure', 'unknown')} ({src})")
 
 
 # --------------------------------------------------------------------------- #
@@ -169,14 +183,57 @@ def schema_check(sidecar: dict | None = None, detected: dict | None = None, **_)
 # 5.2  volume / pair integrity
 # --------------------------------------------------------------------------- #
 @register_qc_check("5.2.volume_integrity", stream="A", required=True)
-def volume_integrity_check(asl_4d=None, n_volumes=None, structure=None, **_) -> CheckResult:
-    """A control/label series must have an even number of volumes."""
+def volume_integrity_check(asl_4d=None, n_volumes=None, structure=None,
+                           aslcontext_rows=None, asl_shape=None, **_) -> CheckResult:
+    """A control/label series must have an even number of volumes - and when an
+    aslcontext.tsv is present, it must list exactly as many volumes as the series
+    holds. A disagreement means a truncated export or the wrong context file, and
+    every downstream control/label pairing would be silently misaligned."""
     if structure and "pre-subtracted" in structure:
         return CheckResult("5.2.volume_integrity", Verdict.NA,
                            reason="pre-subtracted image has no control/label pairs")
-    if n_volumes is None and asl_4d is not None:
+    # the image itself is the strongest evidence of the volume count
+    actual = None
+    if asl_4d is not None:
         arr = np.asarray(asl_4d)
-        n_volumes = arr.shape[3] if arr.ndim == 4 else 1
+        actual = arr.shape[3] if arr.ndim == 4 else 1
+    elif asl_shape is not None and len(asl_shape) == 4:
+        actual = int(asl_shape[3])
+    rows = [r.strip().lower() for r in aslcontext_rows] if aslcontext_rows else None
+    if rows and actual is not None and len(rows) != actual:
+        return CheckResult(
+            "5.2.volume_integrity", Verdict.FAIL,
+            metric={"aslcontext_volumes": len(rows), "series_volumes": actual},
+            reason=f"aslcontext.tsv lists {len(rows)} volumes but the "
+                   f"series holds {actual} - control/label pairing cannot be trusted")
+    if rows:
+        # Grade the control/label rows ONLY. A BIDS M0Type=Included series
+        # legitimately lists its m0scan (and deltam) rows inside aslcontext,
+        # so 1 m0scan + 4 pairs is a valid 9-row file - the raw count fed to
+        # the even/odd test called that an "incomplete pair".
+        n_c, n_l = rows.count("control"), rows.count("label")
+        other = len(rows) - n_c - n_l
+        metric = {"n_control": n_c, "n_label": n_l, "n_other": other}
+        if n_c != n_l:
+            return CheckResult("5.2.volume_integrity", Verdict.FAIL, metric=metric,
+                               reason=f"aslcontext.tsv lists {n_c} control vs {n_l} "
+                                      "label volumes - unpaired")
+        if n_c == 0:
+            return CheckResult("5.2.volume_integrity", Verdict.NA, metric=metric,
+                               reason="aslcontext.tsv lists no control/label volumes "
+                                      "(deltam/m0scan series) - no pairs to check")
+        if actual is None and n_volumes is None:
+            # the tsv alone is internally consistent, but a PASS here would
+            # assert the integrity of a series that was never seen
+            return CheckResult("5.2.volume_integrity", Verdict.UNKNOWN, metric=metric,
+                               reason=f"aslcontext.tsv declares {n_c} pairs but no "
+                                      "ASL series was supplied to verify against")
+        extra = f" (+{other} m0scan/deltam)" if other else ""
+        return CheckResult("5.2.volume_integrity", Verdict.PASS,
+                           metric={**metric, "n_pairs": n_c},
+                           reason=f"{len(rows)} volumes -> {n_c} control/label pairs{extra}")
+    if actual is not None:
+        n_volumes = actual
     if n_volumes is None:
         return CheckResult("5.2.volume_integrity", Verdict.UNKNOWN, reason="volume count unknown")
     if n_volumes < 2:
@@ -196,9 +253,11 @@ def volume_integrity_check(asl_4d=None, n_volumes=None, structure=None, **_) -> 
 # --------------------------------------------------------------------------- #
 @register_qc_check("5.3.swap", stream="A", required=True)
 def swap_check(asl_4d=None, background_suppression=None, structure=None,
-               cfg: QCConfig = QCConfig(), **_) -> CheckResult:
-    """Even volumes (assumed control) should be brighter than odd (label). N/A if
-    background suppression is ON or the data is pre-subtracted."""
+               aslcontext_rows=None, cfg: QCConfig = QCConfig(), **_) -> CheckResult:
+    """Control volumes should be brighter than label volumes. The control/label
+    order comes from aslcontext.tsv when one is present; only without it does the
+    even=control heuristic apply. N/A if background suppression is ON or the data
+    is pre-subtracted."""
     if background_suppression:
         return CheckResult("5.3.swap", Verdict.NA,
                            reason="background suppression on - intensity logic does not apply")
@@ -210,18 +269,33 @@ def swap_check(asl_4d=None, background_suppression=None, structure=None,
     if arr.ndim != 4 or arr.shape[3] < 2:
         return CheckResult("5.3.swap", Verdict.NA, reason="not a multi-volume series")
 
-    even_slab, odd_slab = arr[..., 0::2], arr[..., 1::2]   # even=control, odd=label
-    if not np.any(np.isfinite(even_slab)) or not np.any(np.isfinite(odd_slab)):
+    # The stated order beats the assumed order, for the same reason stated
+    # metadata beats inferred everywhere else: a perfectly valid label-first
+    # acquisition graded FAIL "likely swap" under even=control, with a metric
+    # claiming "(no aslcontext.tsv)" while the rows sat in the same inputs dict.
+    rows = ([r.strip().lower() for r in aslcontext_rows]
+            if aslcontext_rows and len(aslcontext_rows) == arr.shape[3] else None)
+    if rows:
+        ctrl_idx = [i for i, r in enumerate(rows) if r == "control"]
+        label_idx = [i for i, r in enumerate(rows) if r == "label"]
+        if not ctrl_idx or not label_idx:
+            return CheckResult("5.3.swap", Verdict.NA,
+                               reason="aslcontext.tsv lists no control/label volumes")
+        ctrl_slab, label_slab = arr[..., ctrl_idx], arr[..., label_idx]
+        assumption = "volume order from aslcontext.tsv"
+    else:
+        ctrl_slab, label_slab = arr[..., 0::2], arr[..., 1::2]   # even=control
+        assumption = "even=control (no aslcontext.tsv); BS assumed off"
+    if not np.any(np.isfinite(ctrl_slab)) or not np.any(np.isfinite(label_slab)):
         return CheckResult("5.3.swap", Verdict.UNKNOWN,
                            reason="control/label volumes are entirely non-finite (all-NaN?)")
-    even = float(np.nanmean(even_slab))        # NaN-robust
-    odd = float(np.nanmean(odd_slab))
-    denom = (abs(even) + abs(odd)) / 2 or 1.0
-    rel = (even - odd) / denom
-    metric = {"mean_control": round(even, 2), "mean_label": round(odd, 2),
-              "rel_diff_pct": round(rel * 100, 2),
-              "assumption": "even=control (no aslcontext.tsv); BS assumed off"}
-    if even >= odd:
+    ctrl = float(np.nanmean(ctrl_slab))        # NaN-robust
+    label = float(np.nanmean(label_slab))
+    denom = (abs(ctrl) + abs(label)) / 2 or 1.0
+    rel = (ctrl - label) / denom
+    metric = {"mean_control": round(ctrl, 2), "mean_label": round(label, 2),
+              "rel_diff_pct": round(rel * 100, 2), "assumption": assumption}
+    if ctrl >= label:
         return CheckResult("5.3.swap", Verdict.PASS, metric=metric,
                            reason=f"control brighter than label ({rel*100:+.2f}%)")
     return CheckResult("5.3.swap", Verdict.FAIL, metric=metric,

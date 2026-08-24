@@ -314,7 +314,7 @@ def _upload_page(error: str = "") -> str:
     <div class="field-label">Raw acquisition <span class="req">one of the two</span>
       <span class="opt">schema, control/label, M0, motion, data type</span></div>
     <div class="drop dropall" id="zone">
-      <input id="files" name="files" type="file" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream" multiple hidden>
+      <input id="files" name="files" type="file" accept=".nii,.gz,.json,.tsv,application/gzip,application/x-gzip,application/octet-stream,application/json" multiple hidden>
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
       <div class="txt">
@@ -456,12 +456,16 @@ def _upload_page(error: str = "") -> str:
   document.getElementById('pickdir').addEventListener('click', function(ev){{
     ev.preventDefault(); folder.click();
   }});
-  // a folder carries everything in it, so only the NIfTIs are kept
+  // a folder carries everything in it, so keep the NIfTIs plus the BIDS
+  // metadata that travels with them - the .json sidecars and aslcontext.tsv.
+  // Dropping those used to throw away Manufacturer/MRAcquisitionType/M0 TR
+  // and force the server back onto filename guessing (OSIPI Challenge data).
   folder.addEventListener('change', function(){{
     var keep = [];
     for(var i=0;i<folder.files.length;i++){{
       var n = folder.files[i].name.toLowerCase();
-      if(n.endsWith('.nii') || n.endsWith('.nii.gz')) keep.push(folder.files[i]);
+      if(n.endsWith('.nii') || n.endsWith('.nii.gz') || n.endsWith('.json') ||
+         n.indexOf('aslcontext') !== -1 && n.endsWith('.tsv')) keep.push(folder.files[i]);
     }}
     var dt = new DataTransfer();
     keep.forEach(function(f){{ dt.items.add(f); }});
@@ -699,7 +703,21 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
 
         for fname, data in raw_parts:
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
-            if not safe.endswith((".nii", ".nii.gz")):
+            # BIDS sidecars keep their own extension so load_folder's
+            # _find_sidecars can see them. The old blanket rename turned
+            # sub-01_asl.json into sub-01_asl.json.nii.gz - which both hid the
+            # metadata AND handed JSON bytes to nib.load as an image.
+            #
+            # Matched case-insensitively AND normalised to lowercase: the JS
+            # folder filter admits SUB01_ASL.JSON, and a case-sensitive check
+            # here appended .nii.gz to it, which then crashed nib.load and took
+            # the whole upload down. Lowercasing the extension keeps nibabel
+            # and the loader's matchers on the name they expect.
+            for ext in (".nii.gz", ".nii", ".json", ".tsv"):
+                if safe.lower().endswith(ext):
+                    safe = safe[:-len(ext)] + ext
+                    break
+            else:
                 safe += ".nii.gz"
             os.makedirs(raw_dir, exist_ok=True)
             with open(os.path.join(raw_dir, safe), "wb") as fh:
