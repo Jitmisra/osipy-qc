@@ -314,13 +314,28 @@ def test_p5_2_voxelwise_normalisation_of_a_structured_m0_warns(clean):
     # the structure-risk line, which a gentle ramp across a thin curved shell
     # does not do
     structured *= np.exp(2.0 * xx / xx.max())
+    # The risk is SELF-REFERENCED: the M0's structure is compared against the
+    # perfusion map's own, because no published placental M0-heterogeneity bound
+    # exists. Here the M0 is far more structured than the (uniform) perfusion.
     r = placenta_m0_heterogeneity_check(m0=structured, placenta_mask=clean.placenta_mask,
+                                        perfusion_map=clean.perfusion,
                                         normalisation_mode="voxel-wise", cfg=CFG)
     assert r.verdict is Verdict.WARN
     assert "imprinted" in r.reason
+    assert r.metric["structure_risk"] == "high"
     scalar = placenta_m0_heterogeneity_check(m0=structured, placenta_mask=clean.placenta_mask,
+                                             perfusion_map=clean.perfusion,
                                              normalisation_mode="scalar", cfg=CFG)
     assert scalar.verdict is Verdict.PASS        # a scalar divide cannot imprint structure
+
+
+def test_p5_2_risk_is_undetermined_without_something_to_compare_against():
+    """Rather than invent an absolute CoV cut-off, the check says it cannot tell."""
+    m0 = np.abs(np.random.default_rng(0).normal(500, 200, (8, 8, 4)))
+    r = placenta_m0_heterogeneity_check(m0=m0, placenta_mask=np.ones((8, 8, 4), bool),
+                                        normalisation_mode="voxel-wise", cfg=CFG)
+    assert r.metric["structure_risk"] == "undetermined"
+    assert r.verdict is Verdict.PASS
 
 
 def test_p5_3_checks_t1_blood_against_field_strength():
@@ -370,11 +385,13 @@ def test_p6_2_reports_without_a_verdict_unless_the_cohort_is_comparable():
     wobbly = np.stack([np.full((5, 5, 2), 10.0 + 5.0 * t) + rng.normal(0, 0.1, (5, 5, 2))
                        for t in range(6)], -1)
     mask = np.ones((5, 5, 2), bool)
-    plain = placenta_temporal_sd_check(delta_m_4d=wobbly, placenta_mask=mask, cfg=CFG)
+    plain = placenta_temporal_sd_check(asl_source_4d=wobbly, placenta_mask=mask,
+                                       labelling_scheme="pCASL", field_strength_T=1.5, cfg=CFG)
     assert plain.verdict is Verdict.INFO
-    assert "not cohort-comparable" in plain.reason
-    graded = placenta_temporal_sd_check(delta_m_4d=wobbly, placenta_mask=mask,
-                                        context={"cohort_comparable": True}, cfg=CFG)
+    assert "not a VSASL 3 T acquisition" in plain.reason
+    # comparability is DERIVED from the acquisition, not taken on trust
+    graded = placenta_temporal_sd_check(asl_source_4d=wobbly, placenta_mask=mask,
+                                        labelling_scheme="VSASL", field_strength_T=3, cfg=CFG)
     assert graded.verdict is Verdict.WARN
     assert graded.metric["reference"] == {"mean_pct": 6.7, "sd_pct": 3.1}
 

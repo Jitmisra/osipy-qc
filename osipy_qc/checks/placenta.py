@@ -46,9 +46,14 @@ from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
 from ..utils.mathops import pearson
 from ..utils.roi import (as_mask, component_sizes, largest_component_fraction,
-                         roi_stats, roi_values)
+                         local_ssim, roi_stats, roi_values)
 
 ORGAN = "placenta"
+
+# Local-SSIM box half-width in voxels. The design specifies a 20 mm kernel; at
+# the 3-4 mm in-plane resolution placental ASL is acquired at, that is a box of
+# roughly 7 voxels across.
+_SSIM_RADIUS = 3
 
 # Unit families the checks fold synonyms into. Two spellings of the same
 # quantity must not be treated as two different quantities.
@@ -150,7 +155,8 @@ def placental_qei_check(**_) -> CheckResult:
 # --------------------------------------------------------------------------- #
 @register_qc_check("p2.1.units_declaration", stream="B", required=True, organ=ORGAN)
 def placenta_units_check(perfusion_map=None, declared_units=None, quantified=None,
-                         constants=None, **_) -> CheckResult:
+                         constants=None, physiological_bound_requested=None,
+                         **_) -> CheckResult:
     """THE GATE. Runs before anything numeric and decides what the map's numbers
     even mean.
 
@@ -170,12 +176,19 @@ def placenta_units_check(perfusion_map=None, declared_units=None, quantified=Non
               "quantified": bool(quantified), "constants": have,
               "missing_constants": missing}
 
+    # The spec's FAIL is "declared_units is None AND the caller requested a
+    # physiological-units metric or supplied a physiological bound" - it is about
+    # a request that cannot be honoured, not about the map itself. Presenting a
+    # map as `quantified` IS such a request (it asserts physiological units), and
+    # an explicit bound is the other form of it.
+    physiological_request = bool(quantified) or bool(physiological_bound_requested)
+    metric["physiological_request"] = physiological_request
     if family is None:
-        if quantified:
+        if physiological_request:
             return CheckResult("p2.1.units_declaration", Verdict.FAIL, metric=metric,
-                               reason="the map is presented as quantified perfusion but its units "
-                                      "are not declared - no physiological bound can be applied to "
-                                      "an unknown quantity")
+                               reason="a physiological-units result was requested but the map's "
+                                      "units are not declared - the request cannot be honoured, "
+                                      "since no bound applies to an unknown quantity")
         return CheckResult("p2.1.units_declaration", Verdict.WARN, metric=metric,
                            reason="units not declared - magnitude checks will report values "
                                   "without grading them")
@@ -219,16 +232,25 @@ def placenta_implausible_check(perfusion_map=None, placenta_mask=None, declared_
                                   f"{cfg.placenta_min_roi_voxels} are needed")
     finite = all_vals[np.isfinite(all_vals)]
     nonfinite_frac = float(1.0 - finite.size / n_all)
-    neg_frac = float(np.count_nonzero(all_vals < 0) / n_all)
+    # Count the non-finite voxels, then EXCLUDE them: the negative and
+    # upper-outlier fractions are shares OF THE MEASURED VOXELS. Leaving them in
+    # the denominator makes both fractions shrink as the map gets emptier, so a
+    # half-absent map with every measured voxel negative would report 50%
+    # negative instead of 100% - the fraction would fall exactly when the data
+    # got worse. `nonfinite_fraction` carries the absence separately.
+    neg_frac = (float(np.count_nonzero(finite < 0) / finite.size)
+                if finite.size else float("nan"))
 
     upper_frac = float("nan")
     fence = float("nan")
     if finite.size:
         p25, p75 = np.percentile(finite, [25, 75])
         fence = float(p75 + cfg.placenta_iqr_multiplier * (p75 - p25))
-        upper_frac = float(np.count_nonzero(finite > fence) / n_all)
+        upper_frac = float(np.count_nonzero(finite > fence) / finite.size)
 
-    metric = {"n_voxels": n_all, "negative_fraction": neg_frac,
+    metric = {"n_voxels": n_all, "n_finite_voxels": int(finite.size),
+              "fraction_denominator": "finite in-mask voxels",
+              "negative_fraction": neg_frac,
               "nonfinite_fraction": nonfinite_frac, "upper_outlier_fraction": upper_frac,
               "upper_fence": fence, "fence_rule": f"P75 + {cfg.placenta_iqr_multiplier}*IQR",
               "units_family": _unit_family(declared_units),
@@ -242,7 +264,7 @@ def placenta_implausible_check(perfusion_map=None, placenta_mask=None, declared_
     if nonfinite_frac > cfg.placenta_nonfinite_fail:
         return CheckResult("p2.2.implausible_values", Verdict.FAIL, metric=metric,
                            reason=f"{shown} - the map is mostly absent inside its own mask")
-    if neg_frac > cfg.placenta_neg_frac_warn or (
+    if (np.isfinite(neg_frac) and neg_frac > cfg.placenta_neg_frac_warn) or (
             np.isfinite(upper_frac) and upper_frac > cfg.placenta_upper_frac_warn):
         return CheckResult("p2.2.implausible_values", Verdict.WARN, metric=metric, provisional=True,
                            reason=f"{shown} - above the implausible-value lines")
@@ -357,6 +379,16 @@ def placenta_mask_integrity_check(placenta_mask=None, perfusion_map=None, mask_s
         problems.append(f"{holes:.1%} enclosed holes")
     if mask_source in (None, ""):
         problems.append("mask provenance not stated")
+    elif ("perfusion" in str(mask_source).lower()
+          and "whole" in str(roi_definition or "").lower()):
+        # Drawing a whole-placenta ROI on the perfusion map itself inverts the
+        # literature's convention (the mask is drawn on the M0 / a structural
+        # image) and risks circularity: the mask is then defined by the very
+        # signal it is used to measure, so a dropout region is excluded from the
+        # ROI rather than reported by it.
+        problems.append("the whole-placenta mask was drawn on the perfusion map itself, which "
+                        "inverts the literature's convention and risks circularity - the mask is "
+                        "defined by the signal it is then used to measure")
     if problems:
         return CheckResult("p3.1.mask_integrity", Verdict.WARN, metric=metric,
                            reason=f"{n} voxels: " + "; ".join(problems))
@@ -386,8 +418,12 @@ def placenta_slab_coverage_check(placenta_mask=None, anatomical_mask=None,
     faces = int(m[:, :, 0].sum() + m[:, :, -1].sum()) if m.ndim == 3 and m.shape[2] > 1 else 0
     edge_frac = float(faces / n)
     metric = {"n_voxels": n, "voxels_on_slab_faces": faces,
+              "edge_slice_occupied": bool(faces > 0),
               "edge_voxel_fraction": edge_frac,
-              "edge_warn": cfg.placenta_edge_voxel_frac}
+              "edge_warn": cfg.placenta_edge_voxel_frac,
+              # explicitly null rather than absent: a reader must be able to see
+              # that coverage was NOT measured, not merely that it is missing
+              "covered_fraction_vs_anatomical": None}
     covered = float("nan")
     if anatomical_mask is not None:
         a = as_mask(anatomical_mask)
@@ -588,7 +624,8 @@ def placenta_m0_state_check(m0=None, m0_labelled=None, m0_background_suppressed=
 
 @register_qc_check("p5.2.m0_heterogeneity", stream="A", required=True, organ=ORGAN)
 def placenta_m0_heterogeneity_check(m0=None, placenta_mask=None, normalisation_mode=None,
-                                    gestational_age_wk=None, cfg: QCConfig = QCConfig(),
+                                    gestational_age_wk=None, perfusion_map=None,
+                                    segment_cov=None, cfg: QCConfig = QCConfig(),
                                     **_) -> CheckResult:
     """How structured is the M0 inside the placenta, and does the normalisation
     strategy cope with it?
@@ -615,18 +652,40 @@ def placenta_m0_heterogeneity_check(m0=None, placenta_mask=None, normalisation_m
     scalar_ref = float(np.percentile(vals, 80))
     mode = (normalisation_mode or "not stated").strip().lower()
     # A voxel-wise divide propagates M0 structure into the perfusion map; a
-    # scalar divide cannot. The risk is therefore about the STRATEGY, judged
-    # against how structured this particular M0 actually is.
-    high_structure = np.isfinite(m0_cov) and m0_cov > 0.30
+    # scalar divide cannot. How much structure counts as "high" is SELF-
+    # REFERENCED: no published placental M0-heterogeneity bound exists, so the
+    # M0's structure is compared against the perfusion map's OWN structure. If
+    # the M0 varies as much as the perfusion does, a voxel-wise divide is
+    # imprinting a comparable amount of M0 pattern onto the result. An absolute
+    # cut-off here would be an invented number pretending to be a measurement.
+    ref_cov = float("nan")
+    ref_source = None
+    if perfusion_map is not None and _grid_error(perfusion_map, placenta_mask) is None:
+        pv = roi_values(perfusion_map, placenta_mask)
+        if pv.size and pv.mean() > 0:
+            ref_cov = float(pv.std(ddof=1) / pv.mean())
+            ref_source = "perfusion map, in mask"
+    elif isinstance(segment_cov, (int, float)) and np.isfinite(segment_cov):
+        ref_cov, ref_source = float(segment_cov), "P2.3 segment CoV"
+    if np.isfinite(ref_cov):
+        high_structure = np.isfinite(m0_cov) and m0_cov >= ref_cov
+    else:
+        # Nothing to self-reference against. Rather than invent an absolute
+        # bound, the risk is left undetermined and the strategy alone is judged.
+        high_structure = False
     metric = {"m0_in_mask_cov": m0_cov, "scalar_reference_p80": scalar_ref,
+              "m0_median": float(np.median(vals)),
               "normalisation_mode": normalisation_mode or "not stated",
-              "structure_risk": "high" if high_structure else "low",
+              "comparison_cov": ref_cov, "comparison_source": ref_source or "none available",
+              "structure_risk": ("high" if high_structure
+                                 else ("low" if np.isfinite(ref_cov) else "undetermined")),
               "gestational_age_wk": gestational_age_wk, "n_voxels": int(vals.size)}
     if "voxel" in mode and high_structure:
         return CheckResult("p5.2.m0_heterogeneity", Verdict.WARN, metric=metric, provisional=True,
-                           reason=f"M0 CoV {m0_cov:.2f} inside the placenta with voxel-wise "
-                                  "normalisation - that structure will be imprinted on the "
-                                  "perfusion map and later read as perfusion heterogeneity")
+                           reason=f"M0 CoV {m0_cov:.2f} inside the placenta is at or above the "
+                                  f"perfusion map's own {ref_cov:.2f}, and normalisation is "
+                                  "voxel-wise - that structure will be imprinted on the map and "
+                                  "later read as perfusion heterogeneity")
     if mode in ("not stated", ""):
         return CheckResult("p5.2.m0_heterogeneity", Verdict.WARN, metric=metric,
                            reason=f"M0 CoV {m0_cov:.2f} inside the placenta, but the "
@@ -711,23 +770,34 @@ def placenta_pair_outliers_check(delta_m_4d=None, placenta_mask=None, labelling_
         mu[enough] = np.nanmean(series[enough], axis=1, keepdims=True)
         sd[enough] = np.nanstd(series[enough], axis=1, ddof=1, keepdims=True)
     valid = np.isfinite(mu) & np.isfinite(sd) & (sd > 0)
-    rejected, fracs = [], []
+    rejected, fracs, signs = [], [], []
     for p in range(series.shape[1]):
         col = series[:, p:p + 1]
         good = valid & np.isfinite(col)
         if not good.any():
-            rejected.append(p); fracs.append(float("nan")); continue
-        dev = np.abs(col[good] - mu[good]) > cfg.placenta_outlier_sd * sd[good]
+            rejected.append(p); fracs.append(float("nan")); signs.append("unmeasurable"); continue
+        resid = (col[good] - mu[good]) / sd[good]
+        dev = np.abs(resid) > cfg.placenta_outlier_sd
         frac = float(dev.sum() / dev.size)
         fracs.append(frac)
         if frac > cfg.placenta_outlier_voxel_frac:
             rejected.append(p)
+            # Keep the SIGN. In VSASL a HIGH outlier is the signature of moving
+            # tissue being labelled as if it were blood - a physically different
+            # failure from a low outlier, and one a reader can act on. Discarding
+            # it (which taking the absolute value alone does) makes the
+            # spurious-labelling warning unreachable.
+            signs.append("high" if float(np.mean(resid[dev])) > 0 else "low")
 
     n_pairs = series.shape[1]
     surviving = n_pairs - len(rejected)
     rejected_frac = float(len(rejected) / n_pairs)
+    n_high = signs.count("high")
+    n_low = signs.count("low")
     metric = {"n_pairs": n_pairs, "n_rejected": len(rejected), "surviving_pairs": surviving,
               "rejected_fraction": rejected_frac, "rejected_indices": rejected,
+              "n_rejected_high": n_high, "n_rejected_low": n_low,
+              "rejection_signs": signs,
               "rule": f"+/-{cfg.placenta_outlier_sd} SD on more than "
                       f"{cfg.placenta_outlier_voxel_frac:.0%} of placental voxels",
               "deviating_voxel_fraction_per_pair": [round(f, 4) if np.isfinite(f) else None
@@ -748,6 +818,14 @@ def placenta_pair_outliers_check(delta_m_4d=None, placenta_mask=None, labelling_
                         f"{cfg.placenta_rejected_frac_warn:.1%} line")
     elif rejected_frac > cfg.placenta_rejected_frac_warn:
         problems.append(f"{rejected_frac:.1%} of pairs rejected")
+    # Only for a DECLARED VSASL acquisition. The physical argument is
+    # scheme-specific - in VSASL a high outlier means moving tissue labelled as
+    # if it were blood - so raising it on an unknown scheme would be asserting a
+    # mechanism that may not apply.
+    scheme = str(labelling_scheme or "").lower()
+    if n_high and "vsasl" in scheme:
+        problems.append(f"{n_high} rejected for EXCESS signal - in VSASL that is the signature of "
+                        "moving tissue being labelled as if it were blood, not simple motion")
     if problems:
         return CheckResult("p6.1.pair_outliers", Verdict.WARN, metric=metric, provisional=True,
                            reason="; ".join(problems))
@@ -758,19 +836,26 @@ def placenta_pair_outliers_check(delta_m_4d=None, placenta_mask=None, labelling_
 
 @register_qc_check("p6.2.temporal_sd", stream="A", required=True, organ=ORGAN)
 def placenta_temporal_sd_check(delta_m_4d=None, asl_source_4d=None, placenta_mask=None,
-                               surviving_pairs=None, context=None,
+                               surviving_pairs=None, labelling_scheme=None,
+                               field_strength_T=None, context=None,
                                cfg: QCConfig = QCConfig(), **_) -> CheckResult:
     """Temporal stability of the placental signal after motion correction.
 
-    Reported as a percentage of the mean so it is comparable across units, and
-    graded only against a cohort-comparable reference (6.7 +/- 3.1%). When the
-    acquisition is not comparable to that cohort the number is still reported -
-    as INFO - because an incomparable threshold is worse than none.
+    The statistic is a VOXELWISE ratio averaged in the mask - per-voxel SD over
+    the retained SOURCE volumes divided by that voxel's own mean, then averaged
+    across the placenta - not the spread of whole-ROI means. The two are
+    different quantities: an ROI mean is stable while individual voxels swing
+    wildly, so the ROI version reports calm on a scan that is not.
+
+    Graded only against a cohort-comparable reference (6.7 +/- 3.1%), and
+    comparability is DERIVED, not taken on trust: the reference cohort is VSASL
+    at 3 T, which is the only setting it was measured in. Anything else is
+    reported as INFO, because an incomparable threshold is worse than none.
     """
-    series_in = delta_m_4d if delta_m_4d is not None else asl_source_4d
-    if series_in is None or placenta_mask is None:
+    source = asl_source_4d if asl_source_4d is not None else delta_m_4d
+    if source is None or placenta_mask is None:
         return CheckResult("p6.2.temporal_sd", Verdict.UNKNOWN, reason="needs a 4D series and a mask")
-    arr = np.asarray(series_in, dtype=float)
+    arr = np.asarray(source, dtype=float)
     if arr.ndim != 4:
         return CheckResult("p6.2.temporal_sd", Verdict.UNKNOWN,
                            reason=f"expected a 4D series, got {arr.shape}")
@@ -784,31 +869,62 @@ def placenta_temporal_sd_check(delta_m_4d=None, asl_source_4d=None, placenta_mas
                            reason=f"only {len(keep)} usable volumes; at least 3 are needed")
 
     m = as_mask(placenta_mask)
-    # ROI mean per volume, then the spread of those means: a whole-organ signal
-    # wandering over time is what motion and contractions look like here.
-    per_vol = np.array([np.nanmean(arr[..., t][m]) for t in keep])
-    per_vol = per_vol[np.isfinite(per_vol)]
-    if per_vol.size < 3:
-        return CheckResult("p6.2.temporal_sd", Verdict.UNKNOWN,
-                           reason="fewer than 3 volumes have finite placental means")
-    mu = float(np.abs(per_vol).mean())
-    tsd_pct = float(per_vol.std(ddof=1) / mu * 100.0) if mu > 0 else float("nan")
+
+    def _voxelwise_ratio(series, invert=False):
+        """Mean over mask voxels of (SD/mean), or (mean/SD) when inverted."""
+        vals = series[m]                            # (n_vox, T)
+        n_fin = np.isfinite(vals).sum(axis=1)
+        ok = n_fin >= 2
+        if not ok.any():
+            return float("nan"), 0
+        mu = np.nanmean(vals[ok], axis=1)
+        sd = np.nanstd(vals[ok], axis=1, ddof=1)
+        good = np.isfinite(mu) & np.isfinite(sd) & (np.abs(mu) > 0) & (sd > 0)
+        if not good.any():
+            return float("nan"), 0
+        ratio = (np.abs(mu[good]) / sd[good]) if invert else (sd[good] / np.abs(mu[good]))
+        return float(ratio.mean()), int(good.sum())
+
+    tsd, n_vox = _voxelwise_ratio(arr[..., keep])
+    tsd_pct = float(tsd * 100.0) if np.isfinite(tsd) else float("nan")
+
+    # tSNR of the SUBTRACTION series is a separate, complementary number
+    tsnr_dm = float("nan")
+    if delta_m_4d is not None:
+        dm = np.asarray(delta_m_4d, dtype=float)
+        if dm.ndim == 4 and dm.shape[:3] == m.shape:
+            dkeep = [t for t in range(dm.shape[3]) if np.isfinite(dm[..., t]).any()]
+            if len(dkeep) >= 2:
+                tsnr_dm, _ = _voxelwise_ratio(dm[..., dkeep], invert=True)
+
     ctx = context if isinstance(context, dict) else {}
-    comparable = bool(ctx.get("cohort_comparable", False))
-    metric = {"normalised_tsd_pct": tsd_pct, "n_volumes_used": int(per_vol.size),
-              "surviving_pairs": surviving_pairs, "cohort_comparable": comparable,
+    scheme = str(labelling_scheme or ctx.get("labelling_scheme") or "").lower()
+    field = field_strength_T if field_strength_T is not None else ctx.get("field_strength_T")
+    comparable = bool("vsasl" in scheme and field is not None and abs(float(field) - 3.0) < 0.3)
+    metric = {"normalised_tsd_pct": tsd_pct,
+              "definition": "voxelwise SD over source images / voxelwise mean, averaged in "
+                            "mask, as percent",
+              "tsnr_delta_m": tsnr_dm, "n_voxels": n_vox,
+              "n_volumes_used": len(keep), "surviving_pairs": surviving_pairs,
+              "cohort_comparable": comparable,
+              "comparability_rule": "the reference cohort is VSASL at 3 T; anything else is "
+                                    "reported without a verdict",
+              "labelling_scheme": labelling_scheme, "field_strength_T": field,
               "reference": {"mean_pct": 6.7, "sd_pct": 3.1},
-              "warn_pct": cfg.placenta_tsd_warn_pct, "context": ctx}
-    if comparable and np.isfinite(tsd_pct) and tsd_pct > cfg.placenta_tsd_warn_pct:
+              "warn_pct": cfg.placenta_tsd_warn_pct}
+    if not np.isfinite(tsd_pct):
+        return CheckResult("p6.2.temporal_sd", Verdict.UNKNOWN, metric=metric,
+                           reason="no placental voxel has a usable temporal mean and SD")
+    if comparable and tsd_pct > cfg.placenta_tsd_warn_pct:
         return CheckResult("p6.2.temporal_sd", Verdict.WARN, metric=metric, provisional=True,
-                           reason=f"temporal SD {tsd_pct:.1f}% of the mean, above the "
-                                  f"{cfg.placenta_tsd_warn_pct}% line for a comparable cohort "
-                                  "(reference 6.7 +/- 3.1%)")
+                           reason=f"voxelwise temporal SD {tsd_pct:.1f}% of the mean, above the "
+                                  f"{cfg.placenta_tsd_warn_pct}% line for the comparable VSASL "
+                                  "3 T cohort (reference 6.7 +/- 3.1%)")
+    tail = ("" if comparable else " - not a VSASL 3 T acquisition, so the reference does not "
+                                 "apply and no verdict is given")
     return CheckResult("p6.2.temporal_sd", Verdict.INFO, metric=metric,
-                       reason=f"temporal SD {tsd_pct:.1f}% of the mean over {per_vol.size} "
-                              "volumes (reference 6.7 +/- 3.1%)"
-                              + ("" if comparable else " - acquisition not cohort-comparable, "
-                                                       "so reported without a verdict"))
+                       reason=f"voxelwise temporal SD {tsd_pct:.1f}% of the mean over "
+                              f"{len(keep)} volumes (reference 6.7 +/- 3.1%){tail}")
 
 
 @register_qc_check("p6.3.registration_residual", stream="A", required=True, organ=ORGAN)
@@ -836,10 +952,29 @@ def placenta_registration_check(asl_source_4d=None, delta_m_4d=None, placenta_ma
         return CheckResult("p6.3.registration_residual", Verdict.FAIL, reason=bad)
 
     m = as_mask(placenta_mask)
-    if reference_volume is not None:
-        ref = np.asarray(reference_volume, dtype=float)[m]
+    # `reference_volume` is documented as an INDEX into the series; an array is
+    # accepted too, because a caller with a separately-reconstructed reference
+    # has nowhere else to put it.
+    ref_source = "median volume"
+    if isinstance(reference_volume, (int, np.integer)) and not isinstance(reference_volume, bool):
+        idx = int(reference_volume)
+        if not (0 <= idx < arr.shape[3]):
+            return CheckResult("p6.3.registration_residual", Verdict.FAIL,
+                               metric={"reference_volume": idx, "n_volumes": int(arr.shape[3])},
+                               reason=f"reference volume index {idx} is outside the series "
+                                      f"(0-{arr.shape[3] - 1}) - no reference is resolvable")
+        ref_vol = arr[..., idx]
+        ref_source = f"volume {idx}"
+    elif reference_volume is not None:
+        ref_vol = np.asarray(reference_volume, dtype=float)
+        if ref_vol.shape != arr.shape[:3]:
+            return CheckResult("p6.3.registration_residual", Verdict.FAIL,
+                               reason=f"reference volume {ref_vol.shape} does not match the "
+                                      f"series {arr.shape[:3]}")
+        ref_source = "supplied array"
     else:
-        ref = np.nanmedian(arr, axis=3)[m]     # the median volume is a robust reference
+        ref_vol = np.nanmedian(arr, axis=3)    # the median volume is a robust reference
+    ref = ref_vol[m]
 
     # Is NCC informative here at all? A correlation between two volumes measures
     # how well their SPATIAL STRUCTURE lines up, so it needs structure to exist.
@@ -856,12 +991,26 @@ def placenta_registration_check(asl_source_4d=None, delta_m_4d=None, placenta_ma
         v = arr[..., t][m]
         good = np.isfinite(v) & np.isfinite(ref)
         nccs.append(pearson(v[good], ref[good]) if good.sum() > 2 else float("nan"))
+    # Local SSIM against the same reference: NCC is global and can stay high
+    # while a region is locally deformed, which is exactly what a contraction
+    # does. The in-mask MINIMUM is taken, so one badly-deformed region is not
+    # averaged away by the rest of the placenta.
+    ssims = []
+    for t in range(arr.shape[3]):
+        smap = local_ssim(arr[..., t], ref_vol, radius=_SSIM_RADIUS)[m]
+        smap = smap[np.isfinite(smap)]
+        ssims.append(float(smap.min()) if smap.size else float("nan"))
+    ssims = np.asarray(ssims, dtype=float)
+    ssim_finite = ssims[np.isfinite(ssims)]
+
     nccs = np.asarray(nccs, dtype=float)
     finite = nccs[np.isfinite(nccs)]
     if finite.size == 0:
         return CheckResult("p6.3.registration_residual", Verdict.UNKNOWN,
                            reason="no volume could be compared with the reference")
     below = float(np.count_nonzero(finite < cfg.placenta_ncc_pass) / finite.size)
+    below_ssim = (float(np.count_nonzero(ssim_finite < cfg.placenta_ssim_pass) / ssim_finite.size)
+                  if ssim_finite.size else float("nan"))
     model = (registration_model or "not declared").strip().lower()
     non_rigid = any(t in model for t in ("non-rigid", "nonrigid", "deform", "elastic",
                                          "bspline", "b-spline", "svr", "dsvr", "affine+"))
@@ -869,7 +1018,11 @@ def placenta_registration_check(asl_source_4d=None, delta_m_4d=None, placenta_ma
               "fraction_below_ncc": below, "ncc_pass": cfg.placenta_ncc_pass,
               "registration_model": registration_model or "not declared",
               "model_is_non_rigid": non_rigid, "n_volumes": int(finite.size),
-              "reference": "supplied" if reference_volume is not None else "median volume",
+              "reference": ref_source,
+              "min_local_ssim": float(ssim_finite.min()) if ssim_finite.size else float("nan"),
+              "median_local_ssim": float(np.median(ssim_finite)) if ssim_finite.size else float("nan"),
+              "fraction_below_ssim": below_ssim, "ssim_pass": cfg.placenta_ssim_pass,
+              "ssim_kernel_voxels": 2 * _SSIM_RADIUS + 1,
               "spatial_contrast_to_noise": cnr, "ncc_informative": bool(informative)}
     if not informative:
         # The model question is still worth answering; the NCC number is not.
@@ -890,14 +1043,21 @@ def placenta_registration_check(asl_source_4d=None, delta_m_4d=None, placenta_ma
                                   "placenta deforms, so a rigid or undeclared model cannot in "
                                   f"principle remove its motion (median NCC "
                                   f"{metric['median_ncc']:.2f})")
+    bad = []
     if below >= cfg.placenta_bad_volume_frac:
+        bad.append(f"{below:.0%} of volumes below NCC {cfg.placenta_ncc_pass}")
+    if np.isfinite(below_ssim) and below_ssim >= cfg.placenta_bad_volume_frac:
+        bad.append(f"{below_ssim:.0%} of volumes below local SSIM {cfg.placenta_ssim_pass}")
+    if bad:
         return CheckResult("p6.3.registration_residual", Verdict.WARN, metric=metric,
                            provisional=True,
-                           reason=f"{below:.0%} of volumes fall below NCC {cfg.placenta_ncc_pass} "
-                                  f"against the reference (median {metric['median_ncc']:.2f})")
+                           reason=f"residual deformation against the reference: {'; '.join(bad)} "
+                                  f"(median NCC {metric['median_ncc']:.2f}, min local SSIM "
+                                  f"{metric['min_local_ssim']:.2f})")
     return CheckResult("p6.3.registration_residual", Verdict.PASS, metric=metric,
-                       reason=f"non-rigid registration, median NCC {metric['median_ncc']:.2f}, "
-                              f"{below:.0%} of volumes below {cfg.placenta_ncc_pass}")
+                       reason=f"non-rigid registration, median NCC {metric['median_ncc']:.2f} and "
+                              f"min local SSIM {metric['min_local_ssim']:.2f}, "
+                              f"{below:.0%} of volumes below the NCC line")
 
 
 @register_qc_check("p6.4.contraction_events", stream="A", required=True, organ=ORGAN)

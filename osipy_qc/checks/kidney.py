@@ -869,6 +869,7 @@ def kidney_registration_check(rbf_map=None, m0=None, delta_m=None, delta_m_4d=No
 
 @register_qc_check("k4.3.slice_coverage", stream="B", required=True, organ=ORGAN)
 def kidney_slice_coverage_check(rbf_map=None, kidney_masks=None, readout=None,
+                                voxel_mm=None, slice_axis=None,
                                 cfg: QCConfig = QCConfig(), **_) -> CheckResult:
     """What share of the slices holding kidney actually carry usable data?
 
@@ -892,21 +893,28 @@ def kidney_slice_coverage_check(rbf_map=None, kidney_masks=None, readout=None,
                                   "(this is the consensus default acquisition)")
 
     rbf = np.asarray(rbf_map, dtype=float)
+    # Which axis the SLICES lie along must be resolved, not assumed. Renal
+    # acquisitions are routinely coronal or oblique, so array axis 2 is not
+    # reliably the slice direction, and counting "slices" along the wrong axis
+    # counts something that is not a slice at all.
+    s_axis, s_source = _slice_axis(voxel_mm or (1.0, 1.0, 1.0), slice_axis)
+    if s_axis is None:
+        s_axis, s_source = 2, ("assumed array axis 2 - voxels are near-isotropic, so the slice "
+                               "direction could not be inferred; pass slice_axis to be sure")
     per_side: dict = {}
     for side, mask in masks.items():
         m = as_mask(mask)
         if m.shape != rbf.shape:
             return CheckResult("k4.3.slice_coverage", Verdict.UNKNOWN,
                                reason=f"{side} mask {m.shape} does not match the map {rbf.shape}")
-        # slices along the last axis, the conventional through-plane direction
         n_with_mask = n_usable = 0
-        for k in range(rbf.shape[2]):
-            sl = m[:, :, k]
+        for k in range(rbf.shape[s_axis]):
+            sl = np.take(m, k, axis=s_axis)
             n_mask = int(sl.sum())
             if n_mask < cfg.kidney_min_slice_voxels:
                 continue
             n_with_mask += 1
-            vals = rbf[:, :, k][sl]
+            vals = np.take(rbf, k, axis=s_axis)[sl]
             good = np.isfinite(vals) & (vals != 0)
             if good.sum() / n_mask >= cfg.kidney_slice_finite_frac:
                 n_usable += 1
@@ -915,7 +923,8 @@ def kidney_slice_coverage_check(rbf_map=None, kidney_masks=None, readout=None,
                           "usable_fraction": frac}
 
     metric = {"per_kidney": per_side, "pass_floor": cfg.kidney_slice_usable_pass,
-              "warn_floor": cfg.kidney_slice_usable_warn}
+              "warn_floor": cfg.kidney_slice_usable_warn,
+              "slice_axis": s_axis, "slice_axis_source": s_source}
     fracs = {s: v["usable_fraction"] for s, v in per_side.items() if np.isfinite(v["usable_fraction"])}
     if not fracs:
         return CheckResult("k4.3.slice_coverage", Verdict.UNKNOWN, metric=metric,

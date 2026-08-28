@@ -263,3 +263,64 @@ def touches_fov_edge(mask: Any) -> bool:
         return False
     return bool(m[0].any() or m[-1].any() or m[:, 0].any() or m[:, -1].any()
                 or m[:, :, 0].any() or m[:, :, -1].any())
+
+
+def box_mean(volume: Any, radius: int) -> np.ndarray:
+    """Local mean over a (2*radius+1)^3 box, in pure NumPy.
+
+    Implemented with cumulative sums, so the cost does not grow with the kernel
+    size. Edge voxels average over the part of the box that exists rather than
+    over zero-padding - the count is accumulated the same way as the sum, so no
+    voxel is silently pulled toward zero at the border.
+    """
+    a = np.asarray(volume, dtype=float)
+    if a.ndim != 3:
+        raise ValueError(f"box_mean expects a 3-D volume, got {a.shape}")
+    if radius < 1:
+        return a.copy()
+
+    def _running(x):
+        out = x
+        for axis in range(3):
+            c = np.cumsum(out, axis=axis)
+            # pad a leading zero so a window starting at 0 is representable
+            zeros = np.zeros_like(np.take(c, [0], axis=axis))
+            c = np.concatenate([zeros, c], axis=axis)
+            n = out.shape[axis]
+            hi = np.minimum(np.arange(n) + radius + 1, n)
+            lo = np.maximum(np.arange(n) - radius, 0)
+            out = np.take(c, hi, axis=axis) - np.take(c, lo, axis=axis)
+        return out
+
+    total = _running(a)
+    count = _running(np.ones_like(a))
+    return total / count
+
+
+def local_ssim(a: Any, b: Any, radius: int = 3) -> np.ndarray:
+    """Local structural similarity map between two volumes, pure NumPy.
+
+    Uses a box kernel via `box_mean`, matching the design's "local means and
+    variances from cumulative sums, no scipy". The stabilising constants follow
+    the usual C1 = (0.01 L)^2, C2 = (0.03 L)^2 with L the dynamic range of the
+    two volumes together, so the map is scale-free and works on perfusion values
+    in any units.
+    """
+    x = np.asarray(a, dtype=float)
+    y = np.asarray(b, dtype=float)
+    if x.shape != y.shape:
+        raise ValueError(f"local_ssim needs matching shapes, got {x.shape} and {y.shape}")
+    finite = np.isfinite(x) & np.isfinite(y)
+    xs = np.where(finite, x, 0.0)
+    ys = np.where(finite, y, 0.0)
+    both = np.concatenate([x[finite].ravel(), y[finite].ravel()]) if finite.any() else np.array([0.0])
+    rng = float(both.max() - both.min()) or 1.0
+    c1, c2 = (0.01 * rng) ** 2, (0.03 * rng) ** 2
+
+    mx, my = box_mean(xs, radius), box_mean(ys, radius)
+    vx = np.maximum(box_mean(xs * xs, radius) - mx * mx, 0.0)
+    vy = np.maximum(box_mean(ys * ys, radius) - my * my, 0.0)
+    cxy = box_mean(xs * ys, radius) - mx * my
+    ssim = (((2 * mx * my + c1) * (2 * cxy + c2))
+            / ((mx * mx + my * my + c1) * (vx + vy + c2)))
+    return np.where(finite, ssim, np.nan)

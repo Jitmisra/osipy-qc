@@ -8,10 +8,11 @@ import numpy as np
 import pytest
 
 from osipy_qc.core import Verdict
-from osipy_qc.utils.roi import (as_mask, as_sides, asymmetry_index,
+from osipy_qc.utils.roi import (as_mask, as_sides, asymmetry_index, box_mean,
                                 component_sizes, connected_components, cov,
-                                largest_component_fraction, roi_fraction,
-                                roi_stats, roi_values, touches_fov_edge, worst)
+                                largest_component_fraction, local_ssim,
+                                roi_fraction, roi_stats, roi_values,
+                                touches_fov_edge, worst)
 
 
 # --------------------------------------------------------------------------- #
@@ -162,3 +163,40 @@ def test_touches_fov_edge():
         m = inside.copy()
         m[idx] = True
         assert touches_fov_edge(m), f"face {idx} not detected"
+
+
+# --------------------------------------------------------------------------- #
+# box_mean / local_ssim (P6.3's local structural test, scipy-free)
+# --------------------------------------------------------------------------- #
+def test_box_mean_edges_and_degenerate_radii():
+    a = np.arange(27, dtype=float).reshape(3, 3, 3)
+    # a box wider than the volume is the global mean everywhere
+    assert np.allclose(box_mean(a, 5), a.mean())
+    # radius 0 is the identity
+    assert np.allclose(box_mean(a, 0), a)
+    # edge voxels average over the part of the box that EXISTS, not over zeros
+    b = np.zeros((5, 5, 5))
+    b[0, 0, 0] = 8.0
+    # the corner's 3x3x3 box has 2*2*2 = 8 real voxels, so the mean is 1.0
+    assert box_mean(b, 1)[0, 0, 0] == pytest.approx(1.0)
+
+
+def test_local_ssim_is_one_for_identical_volumes_and_drops_with_noise():
+    x = np.random.default_rng(0).normal(10, 2, (8, 8, 8))
+    assert np.nanmedian(local_ssim(x, x)) == pytest.approx(1.0, abs=1e-6)
+    y = x + np.random.default_rng(1).normal(0, 4, (8, 8, 8))
+    assert np.nanmedian(local_ssim(x, y)) < 0.8
+
+
+def test_local_ssim_sees_a_local_change_that_global_correlation_misses():
+    """The reason the design asks for BOTH: a correlation over the whole ROI
+    stays high while one region is badly deformed."""
+    from osipy_qc.utils.mathops import pearson
+    rng = np.random.default_rng(2)
+    a = rng.normal(10, 3, (20, 20, 20))
+    b = a.copy()
+    b[2:5, 2:5, 2:5] = 20.0                      # one locally destroyed block
+    # 27 voxels in 8000: the global correlation is essentially untouched...
+    assert pearson(a.ravel(), b.ravel()) > 0.95
+    # ...while the local measure drops far below the 0.6 line the design uses
+    assert np.nanmin(local_ssim(a, b)) < 0.5

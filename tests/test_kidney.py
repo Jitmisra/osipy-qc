@@ -610,3 +610,33 @@ def test_every_check_reports_without_inputs_and_none_crashes():
     assert len(rep.results) == 19
     assert not [r for r in rep.results if "check error" in r.reason]
     assert all(r.verdict in (Verdict.UNKNOWN, Verdict.NA) for r in rep.results)
+
+
+def test_k4_3_resolves_the_slice_axis_instead_of_assuming_axis_2():
+    """Renal acquisitions are routinely coronal or oblique, so array axis 2 is
+    not reliably the slice direction - counting "slices" along the wrong axis
+    counts something that is not a slice."""
+    rbf = np.full((6, 20, 20), 300.0)
+    mask = np.ones((6, 20, 20), bool)
+    rbf[2] = 0.0                                 # one dead slice, along axis 0
+    r = kidney_slice_coverage_check(rbf_map=rbf, kidney_masks={"left": mask},
+                                    voxel_mm=(8.0, 2.0, 2.0), cfg=CFG)
+    assert r.metric["slice_axis"] == 0
+    assert r.metric["per_kidney"]["left"]["usable_fraction"] == pytest.approx(5 / 6)
+    # near-isotropic voxels carry no evidence of a slice direction; the fallback
+    # is stated in the metric rather than hidden
+    iso = kidney_slice_coverage_check(rbf_map=rbf, kidney_masks={"left": mask},
+                                      voxel_mm=(2.0, 2.0, 2.0), cfg=CFG)
+    assert iso.metric["slice_axis"] == 2
+    assert "could not be inferred" in iso.metric["slice_axis_source"]
+
+
+def test_k4_3_zero_usable_slices_is_unknown_not_fail():
+    """The spec: "FAIL never on the fraction. Fewer than one usable slice per
+    kidney is instead reported as UNKNOWN, since no ROI statistic exists to
+    grade." The cut-points are uncalibrated, so they may not carry a FAIL."""
+    dead = np.zeros((4, 12, 12))
+    r = kidney_slice_coverage_check(rbf_map=dead, kidney_masks={"left": np.ones((4, 12, 12), bool)},
+                                    voxel_mm=(8.0, 2.0, 2.0), cfg=CFG)
+    assert r.verdict is Verdict.UNKNOWN
+    assert "no ROI statistic" in r.reason
