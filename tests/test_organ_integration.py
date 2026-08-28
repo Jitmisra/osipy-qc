@@ -402,3 +402,26 @@ def test_no_html_entity_renders_as_literal_text():
     page = web._upload_page()
     assert not re.findall(r"&amp;[a-z]+;", page), re.findall(r"&amp;[a-z]+;", page)
     assert "Kidney — left" in page and "Cortex — right" in page
+
+
+def test_masks_supplied_through_the_boxes_are_counted_as_masks():
+    """k5.2 counted only files it could name from the raw drop, so a user who
+    supplied six masks through the per-organ boxes was told '0 mask file(s)' -
+    which reads as a failed upload when the masks graded perfectly well."""
+    from osipy_qc.checks.kidney import kidney_data_type_check
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    r = kidney_data_type_check(files=[{"name": "M0.nii.gz"}],
+                               kidney_masks=c.kidney_masks,
+                               cortex_masks=c.cortex_masks,
+                               medulla_masks=c.medulla_masks)
+    assert r.metric["n_masks"] == 6
+    assert "0 mask" not in r.reason
+    assert "6 mask(s) supplied directly" in r.reason
+
+
+def test_the_fields_that_gate_whole_checks_are_marked_on_the_form():
+    """An empty units box turns two kidney checks into UNKNOWN and every
+    placenta magnitude check into a refusal to grade. Nothing on the form said
+    so, so the first sign was an unexplained UNKNOWN in the report."""
+    page = web._upload_page()
+    assert page.count("gates checks") == 3      # kidney units, placenta units, GA

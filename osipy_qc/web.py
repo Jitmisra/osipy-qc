@@ -68,7 +68,7 @@ _CONSOLE_CSS = """
 
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem;margin:.7rem 0}
 .fact{display:flex;flex-direction:column;gap:.25rem}
-.fact>span{font-size:.8rem;font-weight:600}
+.fact>span{font-size:.8rem;font-weight:600;display:flex;align-items:baseline;gap:.4rem}\n.fact>span .req{font-family:var(--mono);font-size:.6rem;color:var(--accent-600);background:var(--accent-050);padding:.05rem .3rem;border-radius:4px;font-weight:600}
 .fact small{font-size:.72rem;color:var(--muted);line-height:1.35}
 .fact input,.fact select{border:1px solid var(--line);border-radius:var(--radius-sm);padding:.45rem .6rem;font:inherit;font-size:.85rem;background:var(--surface);color:var(--ink)}
 .fact input:focus,.fact select:focus{outline:2px solid var(--accent);outline-offset:1px}
@@ -322,7 +322,7 @@ _ORGAN_FACTS: dict[str, list[tuple]] = {
     "kidney": [
         ("units", "Units of the map", "select",
          ["", "mL/100g/min", "mL/min/100mL", "a.u."],
-         "required: the 50-500 bound is stated per 100 g"),
+         "gates the level and implausible-value checks", True),
         ("labelling", "Labelling scheme", "select", ["", "FAIR", "pCASL", "PASL", "ASL"],
          "FAIR reads ~1.8x higher than pCASL in the same subjects"),
         ("pld_or_ti_s", "PLD / TI (s)", "number", None,
@@ -337,11 +337,11 @@ _ORGAN_FACTS: dict[str, list[tuple]] = {
     "placenta": [
         ("declared_units", "Units of the map", "select",
          ["", "mL/100g/min", "%M0", "a.u."],
-         "REQUIRED &mdash; every magnitude check is gated on this"),
+         "gates every magnitude check", True),
         ("labelling_scheme", "Labelling scheme", "select", ["", "VSASL", "pCASL", "FAIR", "PASL"],
          "decides WHICH circulation was measured"),
         ("gestational_age_wk", "Gestational age (wk)", "number", None,
-         "REQUIRED &mdash; perfusion changes across gestation"),
+         "perfusion changes across gestation", True),
         ("maternal_position", "Maternal position", "select", ["", "supine", "lateral", "prone"],
          "lateral and supine differ materially"),
         ("field_strength_T", "Field strength (T)", "number", None, "1.5 T / 3 T / 0.55 T"),
@@ -413,7 +413,9 @@ def _organ_fact_fields() -> str:
     out = []
     for organ, fields in _ORGAN_FACTS.items():
         cells = []
-        for field, label, kind, options, hint in fields:
+        for spec in fields:
+            field, label, kind, options, hint = spec[:5]
+            gating = len(spec) > 5 and spec[5]
             name = f"{organ}__{field}"
             if kind == "select":
                 opts = "".join(
@@ -423,7 +425,8 @@ def _organ_fact_fields() -> str:
             else:
                 step = ' step="any" inputmode="decimal"' if kind == "number" else ""
                 ctl = f'<input type="{kind}" name="{name}"{step}>'
-            cells.append(f'<label class="fact"><span>{label}</span>{ctl}'
+            chip = ('<span class="req">gates checks</span>' if gating else "")
+            cells.append(f'<label class="fact"><span>{label}{chip}</span>{ctl}'
                          f'<small>{hint}</small></label>')
         out.append(
             f'<div class="organ-only" data-organ="{organ}" hidden>'
@@ -890,7 +893,8 @@ def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
     out.update(masks)
 
     # ---- acquisition facts -------------------------------------------------
-    for field, _label, kind, _opts, _hint in _ORGAN_FACTS.get(organ, []):
+    for spec in _ORGAN_FACTS.get(organ, []):
+        field, kind = spec[0], spec[2]
         val = _num(field) if kind == "number" else _text(field)
         if val is not None:
             out[field] = val

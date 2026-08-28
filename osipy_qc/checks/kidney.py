@@ -1056,8 +1056,9 @@ def kidney_metadata_check(sidecar=None, header=None, affine=None, detected=None,
 
 
 @register_qc_check("k5.2.data_type", stream="A", required=True, organ=ORGAN)
-def kidney_data_type_check(files=None, context=None, detected=None,
-                           sidecar=None, **_) -> CheckResult:
+def kidney_data_type_check(files=None, context=None, detected=None, sidecar=None,
+                           kidney_masks=None, cortex_masks=None, medulla_masks=None,
+                           **_) -> CheckResult:
     """Routing check: what kind of renal dataset is this? Emits INFO, never grades.
 
     Masks are classified BEFORE images, because a renal dataset routinely ships
@@ -1065,7 +1066,16 @@ def kidney_data_type_check(files=None, context=None, detected=None,
     no modality token at all. Reading those as images is how a mask ends up
     graded as a perfusion map.
     """
-    if not files and not detected:
+    # Masks that arrived through the console's per-role boxes are NOT in `files`
+    # - they are already resolved arrays. Counting only filenames reported
+    # "0 mask file(s)" to a user who had just supplied six, which reads as if
+    # the upload had failed when the masks were graded perfectly well.
+    supplied = {kind: sorted(as_sides(m))
+                for kind, m in (("kidney", kidney_masks), ("cortex", cortex_masks),
+                                ("medulla", medulla_masks))
+                if as_sides(m)}
+    n_supplied = sum(len(v) for v in supplied.values())
+    if not files and not detected and not n_supplied:
         return CheckResult("k5.2.data_type", Verdict.UNKNOWN, reason="no files to inspect")
 
     roles: dict[str, list[str]] = {}
@@ -1105,15 +1115,26 @@ def kidney_data_type_check(files=None, context=None, detected=None,
                or sc.get("MRAcquisitionType") or "unknown")
     has_sides = any("left" in n.lower() or "right" in n.lower()
                     for names in roles.values() for n in names)
+    named_masks = len(roles.get("kidney_mask", []) + roles.get("cortex_mask", [])
+                      + roles.get("medulla_mask", []))
+    total_masks = named_masks + n_supplied
     metric = {"roles": {k: sorted(v) for k, v in roles.items()},
               "labelling": labelling, "readout": readout,
-              "per_side_masks_named": has_sides,
+              "masks_from_filenames": named_masks,
+              "masks_supplied_directly": supplied,
+              "n_masks": total_masks,
+              "per_side_masks_named": has_sides or bool(n_supplied),
               "n_files": len(files or [])}
+    if n_supplied:
+        sides = sorted({s for v in supplied.values() for s in v})
+        how = f"{total_masks} mask(s) supplied directly ({', '.join(sides)})"
+    elif named_masks:
+        how = (f"{named_masks} mask file(s), "
+               f"{'per-side names found' if has_sides else 'no per-side names'}")
+    else:
+        how = "no masks"
     return CheckResult("k5.2.data_type", Verdict.INFO, metric=metric,
-                       reason=f"{labelling} {readout} renal dataset; "
-                              f"{len(roles.get('kidney_mask', []) + roles.get('cortex_mask', []))} "
-                              f"mask file(s), "
-                              f"{'per-side names found' if has_sides else 'no per-side names'}")
+                       reason=f"{labelling} {readout} renal dataset; {how}")
 
 
 @register_qc_check("k5.3.swap", stream="A", required=True, organ=ORGAN)
