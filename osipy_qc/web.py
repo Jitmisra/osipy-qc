@@ -299,14 +299,17 @@ _ORGAN_NOTE = {
 # reported separately); the placenta list follows P4.1/P4.2, where the labelling
 # scheme decides WHICH CIRCULATION was measured and gestational age is what makes
 # a perfusion value interpretable.
+# NOTE: titles and hints here are passed through esc(), so they must contain
+# REAL characters, not HTML entities - an entity would be double-escaped and
+# render as the literal text "&mdash;".
 _ORGAN_MASKS: dict[str, list[tuple[str, str, str]]] = {
     "kidney": [
-        ("kidney_left", "Kidney &mdash; left", "whole-kidney mask"),
-        ("kidney_right", "Kidney &mdash; right", "whole-kidney mask"),
-        ("cortex_left", "Cortex &mdash; left", "the consensus ROI (R10.1)"),
-        ("cortex_right", "Cortex &mdash; right", "the consensus ROI (R10.1)"),
-        ("medulla_left", "Medulla &mdash; left", "optional; integrity flag only"),
-        ("medulla_right", "Medulla &mdash; right", "optional; integrity flag only"),
+        ("kidney_left", "Kidney \u2014 left", "whole-kidney mask"),
+        ("kidney_right", "Kidney \u2014 right", "whole-kidney mask"),
+        ("cortex_left", "Cortex \u2014 left", "the consensus ROI (R10.1)"),
+        ("cortex_right", "Cortex \u2014 right", "the consensus ROI (R10.1)"),
+        ("medulla_left", "Medulla \u2014 left", "optional; integrity flag only"),
+        ("medulla_right", "Medulla \u2014 right", "optional; integrity flag only"),
     ],
     "placenta": [
         ("placenta_mask", "Placenta mask", "one mask, on the perfusion grid"),
@@ -478,17 +481,6 @@ def _upload_page(error: str = "") -> str:
     <div class="field-label">Organ <span class="req">choose first</span>
       <span class="opt">it decides which files and which thresholds apply</span></div>
     <div class="seg">{organ_seg}</div>
-    <p class="hint" data-organ-hint="brain"><b>Brain</b> is the v1.0 target and the only organ with
-       a validated quality index (QEI, cut-off 0.5).</p>
-    <p class="hint" data-organ-hint="kidney" hidden><b>Kidney.</b> The renal consensus states 59
-       rules and <b>no quality thresholds at all</b>, so every bound here is uncalibrated and
-       several checks can never FAIL. Report is <b>per kidney</b> and the graded ROI is the
-       <b>cortex</b> (R10.1). Masks come from you &mdash; there is no renal equivalent of
-       &ldquo;just run BET on it&rdquo;.</p>
-    <p class="hint" data-organ-hint="placenta" hidden><b>Placenta.</b> There is no placental
-       consensus document, and no public placental ASL dataset exists &mdash; this module is
-       validated against synthetic phantoms only. <b>Units and gestational age are required</b>:
-       without them the magnitude checks cannot be applied to a known quantity.</p>
 
     <div class="field-label"><span data-map-label>CBF map</span> <span class="req">one of the two</span>
       <span class="opt">QEI, noise, CBF level, coverage</span></div>
@@ -623,9 +615,6 @@ def _upload_page(error: str = "") -> str:
     var organ = el ? el.value : 'brain';
     document.querySelectorAll('.organ-only').forEach(function(node){{
       node.hidden = node.getAttribute('data-organ') !== organ;
-    }});
-    document.querySelectorAll('[data-organ-hint]').forEach(function(node){{
-      node.hidden = node.getAttribute('data-organ-hint') !== organ;
     }});
     // A perfusion map is called something different in each organ, and the
     // label is what tells the reader which one to drop here.

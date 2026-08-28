@@ -392,3 +392,13 @@ def test_the_outlier_thresholds_the_console_renders_actually_grade():
     assert "overridden" in loose.metric["rule"]
     assert tight.metric["parameters_customised"] is False
     assert tight.metric["published_parameters"] == {"k": 2.0, "limit": 0.20}
+
+
+def test_no_html_entity_renders_as_literal_text():
+    """_dropzone escapes its title, so an HTML entity written there is
+    double-escaped and the user sees the literal text "&mdash;". The page is
+    UTF-8, so labels must carry real characters."""
+    import re
+    page = web._upload_page()
+    assert not re.findall(r"&amp;[a-z]+;", page), re.findall(r"&amp;[a-z]+;", page)
+    assert "Kidney — left" in page and "Cortex — right" in page
