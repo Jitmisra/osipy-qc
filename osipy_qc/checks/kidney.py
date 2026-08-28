@@ -1549,7 +1549,17 @@ def kidney_outlier_rate_check(delta_m_4d=None, kidney_masks=None, rule=None,
         return CheckResult("k7.2.outlier_rate", Verdict.UNKNOWN, reason="needs a kidney mask")
 
     name = rule if rule in _OUTLIER_RULES else "harteveld_2sd_20pct"
-    spec = _OUTLIER_RULES[name]
+    spec = dict(_OUTLIER_RULES[name])
+    # The config carries the SD multiplier and voxel fraction, and the console
+    # renders both as editable. They were previously ignored in favour of the
+    # hard-coded table, so a user could type any value and nothing moved - a
+    # control that grades nothing. Editing them away from the published values
+    # is legitimate (the counts they produce are uncalibrated), but the report
+    # must say the applied rule is no longer the published one.
+    published = (spec["k"], spec["limit"])
+    if spec["mode"] == "reject_above":
+        spec["k"], spec["limit"] = cfg.kidney_outlier_sd, cfg.kidney_outlier_voxel_frac
+    customised = spec["mode"] == "reject_above" and (spec["k"], spec["limit"]) != published
     per_side: dict = {}
     for side, mask in masks.items():
         m = as_mask(mask)
@@ -1599,7 +1609,11 @@ def kidney_outlier_rate_check(delta_m_4d=None, kidney_masks=None, rule=None,
     asym = (abs(list(counts.values())[0] - list(counts.values())[1])
             if len(counts) == 2 else 0)
     is_2d = isinstance(readout, str) and readout.strip().lower().startswith("2d")
-    metric = {"per_kidney": per_side, "rule": name, "rule_parameters": spec,
+    metric = {"per_kidney": per_side,
+              "rule": (f"{name} (parameters overridden)" if customised else name),
+              "rule_parameters": spec,
+              "published_parameters": {"k": published[0], "limit": published[1]},
+              "parameters_customised": customised,
               "left_right_asymmetry": asym, "readout": readout,
               "n_pairs_acquired": n_pairs_acquired,
               "calibration_note": "the rule fires in ~2/3 of NORMAL healthy datasets - "

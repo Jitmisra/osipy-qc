@@ -325,3 +325,70 @@ def test_organ_folder_loading_works_from_the_cli():
     import osipy_qc.cli as cli
     src = open(cli.__file__).read()
     assert "from .io import load_folder, load_organ_folder" in src
+
+
+def test_the_per_role_boxes_beat_the_filename():
+    """The escape hatch that exists SOLELY to defeat filename guessing was itself
+    pure filename guessing: the field name was discarded and the role re-derived
+    from the name. A scan called anon_0042.nii.gz - what an anonymiser emits, in
+    the multi-centre setting this toolbox is for - was dropped, and the report
+    said "no M0" about a file the user had put in the box marked M0."""
+    from osipy_qc.checks.schema import classify_role
+    from osipy_qc.synth import synthetic_control_label
+
+    # these are all names classify_role cannot place, and all realistic
+    for name in ("anon_0042.nii.gz", "IM_0001.nii.gz", "proton_density.nii.gz",
+                 "PD.nii.gz", "FAIR.nii.gz", "Q2TIPS.nii.gz"):
+        assert classify_role(name) == "other", name
+
+    asl = synthetic_control_label(n_pairs=8)
+    body = (_part("raw_asl", "anon_0042.nii.gz", _nii(asl))
+            + _part("raw_m0", "anon_0043.nii.gz", _nii(asl[..., 0]))
+            + _part("organ", data=b"brain") + _part("population", data=b"adult")
+            + _part("files", "", b"") * 2)
+    ids = {x["id"]: x["verdict"] for x in _grade(body)["checks"]}
+    assert ids["6.1.m0_present"] == "PASS", "the M0 box was ignored"
+    assert ids["5.2.volume_integrity"] == "PASS"
+    assert ids["5.3.swap"] == "PASS"
+
+
+def test_role_overrides_reach_the_loader():
+    """The override has to survive into detect_dataset too, or 8.2 reports a
+    dataset with no ASL series while the checks grade one."""
+    import tempfile as _tf
+
+    from osipy_qc.io import load_folder
+    from osipy_qc.synth import synthetic_control_label
+    with _tf.TemporaryDirectory() as d:
+        p = os.path.join(d, "anon_0042.nii.gz")
+        nib.save(nib.Nifti1Image(synthetic_control_label(n_pairs=4).astype(np.float32),
+                                 np.diag([3., 3., 3., 1.])), p)
+        plain = load_folder(d, load_arrays=False)
+        assert plain["detected"]["structure"] == "unknown"
+        fixed = load_folder(d, load_arrays=False,
+                            role_overrides={"anon_0042.nii.gz": "asl"})
+        assert "control/label" in fixed["detected"]["structure"]
+        assert fixed["asl_shape"][3] == 8
+
+
+def test_the_outlier_thresholds_the_console_renders_actually_grade():
+    """kidney_outlier_sd and kidney_outlier_voxel_frac were rendered as editable
+    but read by nothing - the rule parameters came from a hard-coded table, so a
+    user could type any value and the rejection count did not move."""
+    from osipy_qc.checks.kidney import kidney_outlier_rate_check
+    rng = np.random.default_rng(11)
+    series = rng.normal(10, 1.0, (6, 6, 3, 12))
+    series[..., 5] += 20.0
+    masks = {"left": np.ones((6, 6, 3), bool)}
+
+    loose = kidney_outlier_rate_check(delta_m_4d=series, kidney_masks=masks,
+                                      cfg=QCConfig(organ="kidney", kidney_outlier_sd=6.0))
+    tight = kidney_outlier_rate_check(delta_m_4d=series, kidney_masks=masks,
+                                      cfg=QCConfig(organ="kidney", kidney_outlier_sd=2.0))
+    assert loose.metric["per_kidney"]["left"]["n_rejected"] < \
+        tight.metric["per_kidney"]["left"]["n_rejected"]
+    # and a report must say when the applied rule is no longer the published one
+    assert loose.metric["parameters_customised"] is True
+    assert "overridden" in loose.metric["rule"]
+    assert tight.metric["parameters_customised"] is False
+    assert tight.metric["published_parameters"] == {"k": 2.0, "limit": 0.20}

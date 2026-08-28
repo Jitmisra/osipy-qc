@@ -133,8 +133,20 @@ def _find_sidecars(folder: str, asl_name: str = "", m0_name: str = "") -> tuple[
     return asl_json, m0_json, rows
 
 
-def load_folder(folder: str, load_arrays: bool = True) -> dict:
-    """Build an `inputs` dict for run_qc from a folder of NIfTIs."""
+def load_folder(folder: str, load_arrays: bool = True,
+                role_overrides: dict[str, str] | None = None) -> dict:
+    """Build an `inputs` dict for run_qc from a folder of NIfTIs.
+
+    `role_overrides` maps a basename to a role ("asl"/"m0"/"t1"), and BEATS the
+    filename vocabulary for that file. It exists because the upload console has
+    a per-role box whose whole purpose is to defeat filename guessing - a user
+    whose scanner emits `anon_0042.nii.gz` puts it in the box marked M0, and the
+    box has to be believed. Without this the role was silently re-derived from
+    the name, classify_role returned "other", and the file was dropped while the
+    report said "no M0" about a file the user had explicitly labelled.
+    """
+    overrides = {k: v for k, v in (role_overrides or {}).items()
+                 if v in ("asl", "m0", "t1")}
     paths = _find_niftis(folder)
     files = []
     by_role: dict[str, list[str]] = {"asl": [], "m0": [], "t1": [], "other": []}
@@ -143,13 +155,15 @@ def load_folder(folder: str, load_arrays: bool = True) -> dict:
         img = nib.load(p)
         shape = tuple(int(s) for s in img.shape)
         voxel = tuple(round(float(z), 3) for z in img.header.get_zooms()[:3])
-        files.append({"name": name, "shape": shape, "voxel_mm": voxel, "path": p})
-        by_role[classify_role(name)].append(p)
+        role = overrides.get(name) or classify_role(name)
+        files.append({"name": name, "shape": shape, "voxel_mm": voxel, "path": p,
+                      "role": role})
+        by_role[role].append(p)
 
     context = os.path.basename(folder.rstrip("/"))
     detected = detect_dataset(files, context)
-    asl_files = [f for f in files if classify_role(f["name"]) == "asl"]
-    m0_files = [f for f in files if classify_role(f["name"]) == "m0"]
+    asl_files = [f for f in files if f["role"] == "asl"]
+    m0_files = [f for f in files if f["role"] == "m0"]
 
     # ---- stated metadata beats inferred metadata --------------------------
     # detect_dataset guesses from shape and filename because that is all the

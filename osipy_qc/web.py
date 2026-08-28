@@ -1036,12 +1036,18 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         safe_dir = re.sub(r"[^A-Za-z0-9._-]", "_", client_dir)[:60] or "raw"
         raw_dir = os.path.join(tmp, safe_dir)
         saved_raw = os.path.isdir(raw_dir)
-        raw_parts = list(fields.get("files_multi", []))
-        for field, value in fields.items():          # the per-role fields still work
-            if field.startswith("raw") and isinstance(value, tuple) and value[1]:
-                raw_parts.append(value)
+        # (filename, bytes, role) - the ROLE is what the per-role box means, and
+        # discarding it was the whole bug: the file was written to disk and then
+        # re-classified from its name, so a box labelled "M0" did nothing for a
+        # scan called anon_0042.nii.gz and the report said "no M0" about it.
+        raw_parts = [(n, d, None) for n, d in fields.get("files_multi", [])]
+        _ROLE_FIELDS = {"raw_asl": "asl", "raw_m0": "m0", "raw_t1": "t1"}
+        for field, value in fields.items():
+            if field in _ROLE_FIELDS and isinstance(value, tuple) and value[1]:
+                raw_parts.append((value[0], value[1], _ROLE_FIELDS[field]))
 
-        for fname, data in raw_parts:
+        role_overrides: dict[str, str] = {}
+        for fname, data, role in raw_parts:
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
             # BIDS sidecars keep their own extension so load_folder's
             # _find_sidecars can see them. The old blanket rename turned
@@ -1062,6 +1068,8 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             os.makedirs(raw_dir, exist_ok=True)
             with open(os.path.join(raw_dir, safe), "wb") as fh:
                 fh.write(data)
+            if role:
+                role_overrides[safe] = role
             saved_raw = True
 
         if not paths["cbf"] and not saved_raw:
@@ -1073,7 +1081,7 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             # the CBF-derived inputs win where the two overlap; the raw folder
             # only adds what it alone can know
             loaded = (load_organ_folder(raw_dir, organ) if organ != "brain"
-                      else load_folder(raw_dir))
+                      else load_folder(raw_dir, role_overrides=role_overrides))
             inputs = {**loaded, **inputs}
 
         if organ != "brain":

@@ -108,7 +108,10 @@ def detect_dataset(files: list[dict], context: str = "") -> dict:
     `context` is extra text to mine (e.g. the folder name, where the vendor often lives)."""
     roles = {"asl": [], "m0": [], "t1": [], "other": []}
     for f in files:
-        roles[classify_role(f["name"])].append(f)
+        # a caller that has already RESOLVED the role (e.g. the user put the file
+        # in a per-role box) passes it through; only fall back to the filename
+        role = f.get("role") or classify_role(f["name"])
+        roles[role].append(f)
 
     context = context + " " + " ".join(f["name"] for f in files)
     asl = roles["asl"][0] if roles["asl"] else None
