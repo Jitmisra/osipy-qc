@@ -178,7 +178,7 @@ def main(argv=None) -> int:
         if args.json:
             print(report.to_json())
         if args.html:
-            from .render import render_html
+            from .report_html import render_html
             with open(args.html, "w") as fh:
                 fh.write(render_html(report, inputs=demo_inputs, cfg=demo_cfg))
             print(f"\nwrote {args.html}")
