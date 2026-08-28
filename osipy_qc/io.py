@@ -336,3 +336,166 @@ def find_aslprep(perf_dir: str) -> dict:
         "wm": first("*label-WM_probseg*", "*WM_probseg*", "*_WM*"),
         "csf": first("*label-CSF_probseg*", "*CSF_probseg*"),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Non-brain organs: kidney and placenta
+# --------------------------------------------------------------------------- #
+# Kidney and placenta are graded inside masks the caller supplies, so the loader
+# has to route those files. There is no BIDS convention for renal or placental
+# ASL and no standard mask naming, so this is a filename vocabulary like the
+# brain's - kept here as data so the upload page can list exactly what it
+# recognises, and so it cannot drift from what the loader actually does.
+_ORGAN_MASK_TOKENS: dict[str, tuple[str, ...]] = {
+    "cortex": ("cortex", "cortical", "cor_"),
+    "medulla": ("medulla", "medullary", "med_"),
+    "kidney": ("kidney", "renal", "whole"),
+    "placenta": ("placenta", "placental"),
+}
+_SIDE_TOKENS: dict[str, tuple[str, ...]] = {
+    "left": ("left", "_l_", "_lt", "-l-", "lkid", "l_kidney"),
+    "right": ("right", "_r_", "_rt", "-r-", "rkid", "r_kidney"),
+}
+
+
+def classify_organ_file(filename: str) -> tuple[str | None, str | None]:
+    """Classify one file for a non-brain organ: (role, side).
+
+    role is one of cortex_mask / medulla_mask / kidney_mask / placenta_mask /
+    perfusion / m0 / other; side is "left"/"right"/None. Masks are tested BEFORE
+    images because a renal dataset routinely ships `cortex_label.nii.gz` and
+    `Label_Map_cortex_medulla.nii.gz`, whose names carry no modality token at
+    all - reading those as images is how a mask ends up graded as a map.
+    """
+    low = filename.lower()
+    side = None
+    for name, tokens in _SIDE_TOKENS.items():
+        if any(t in low for t in tokens):
+            side = name
+            break
+
+    looks_like_mask = any(t in low for t in ("mask", "label", "seg", "roi", "_lbl"))
+    # A file naming BOTH structures is a combined label map, not a cortex mask.
+    # renaldro ships exactly this: Label_Map_cortex_medulla.nii.gz with 0=background,
+    # 1=cortex, 2=medulla. Classifying it as "cortex" would silently grade the
+    # medulla voxels as cortex.
+    if (any(t in low for t in _ORGAN_MASK_TOKENS["cortex"])
+            and any(t in low for t in _ORGAN_MASK_TOKENS["medulla"])):
+        return "cortex_medulla_labelmap", side
+    for role, tokens in _ORGAN_MASK_TOKENS.items():
+        if any(t in low for t in tokens):
+            # "cortex"/"medulla"/"placenta" name a structure, so they are masks
+            # even without an explicit mask token; "kidney"/"renal" are also used
+            # for images (ASL_RBF is not, but kidney_asl.nii.gz is), so those
+            # require the mask token.
+            if role in ("cortex", "medulla", "placenta") or looks_like_mask:
+                return f"{role}_mask", side
+    if any(t in low for t in ("rbf", "perfusion", "cbf", "flow", "_pwi")):
+        return "perfusion", side
+    if any(t in low for t in ("m0", "calib")):
+        return "m0", side
+    if any(t in low for t in ("asl", "pcasl", "pasl", "fair", "vsasl", "deltam", "control",
+                              "label_", "tag")):
+        return "asl", side
+    return "other", side
+
+
+def organ_mask_vocabulary() -> dict:
+    """The filename rules above, as JSON-serialisable data for the upload page."""
+    return {"structures": {k: list(v) for k, v in _ORGAN_MASK_TOKENS.items()},
+            "sides": {k: list(v) for k, v in _SIDE_TOKENS.items()}}
+
+
+def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict:
+    """Build an `inputs` dict for a kidney or placenta folder.
+
+    Masks are REQUIRED for most checks and are never invented here: there is no
+    renal or placental equivalent of "just run BET on it", and a mask this
+    loader guessed would be a mask nobody could check. A folder with no mask
+    loads fine and simply produces UNKNOWNs, which is the honest outcome.
+    """
+    if organ not in ("kidney", "placenta"):
+        return load_folder(folder, load_arrays=load_arrays)
+
+    paths = _find_niftis(folder)
+    files, by_role = [], {}
+    for p in paths:
+        name = os.path.basename(p)
+        img = nib.load(p)
+        files.append({"name": name, "shape": tuple(int(s) for s in img.shape),
+                      "voxel_mm": tuple(round(float(z), 3) for z in img.header.get_zooms()[:3]),
+                      "path": p})
+        role, side = classify_organ_file(name)
+        by_role.setdefault((role, side), []).append(p)
+
+    asl_json, m0_json, _rows = _find_sidecars(folder)
+    inputs: dict = {"files": files, "context": os.path.basename(folder.rstrip("/")),
+                    "organ": organ}
+    if asl_json:
+        inputs["sidecar"] = asl_json
+    if m0_json:
+        inputs["m0_sidecar"] = m0_json
+        tr = m0_json.get("RepetitionTimePreparation", m0_json.get("RepetitionTime"))
+        if isinstance(tr, list) and tr and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in tr):
+            tr = min(tr)
+        if isinstance(tr, (int, float)) and not isinstance(tr, bool):
+            inputs["m0_tr_s"] = float(tr)
+
+    def _first(role, side=None):
+        hits = by_role.get((role, side)) or []
+        return hits[0] if hits else None
+
+    def _load_first(role, side=None):
+        p = _first(role, side)
+        return _load(p) if (p and load_arrays) else None
+
+    if organ == "kidney":
+        # A combined label map is unpacked first, so the separate-file route can
+        # still override it if both are supplied.
+        combined = _load_first("cortex_medulla_labelmap")
+        if combined is not None:
+            lab = np.squeeze(combined)
+            inputs["cortex_masks"] = {"single": lab == 1}
+            inputs["medulla_masks"] = {"single": lab == 2}
+            inputs["kidney_masks"] = {"single": lab > 0}
+            inputs["mask_note"] = ("cortex/medulla taken from a combined label map "
+                                   "(1=cortex, 2=medulla); the two kidneys are not "
+                                   "separated, so per-kidney checks report one ROI")
+        for kind, key in (("kidney_mask", "kidney_masks"), ("cortex_mask", "cortex_masks"),
+                          ("medulla_mask", "medulla_masks")):
+            masks = {}
+            for side in ("left", "right"):
+                arr = _load_first(kind, side)
+                if arr is not None:
+                    masks[side] = arr > 0.5
+            if masks:
+                inputs[key] = masks
+        # `a or b` on ndarrays raises: numpy refuses to reduce an array to a
+        # single truth value. Chained fallbacks must test `is not None`.
+        perf = _load_first("perfusion")
+        if perf is None:
+            perf = _load_first("perfusion", "left")
+        if perf is not None:
+            inputs["rbf_map"] = perf
+            inputs["units"] = "mL/100g/min"      # declared by the caller in the UI
+    else:
+        arr = _load_first("placenta_mask")
+        if arr is not None:
+            inputs["placenta_mask"] = arr > 0.5
+        perf = _load_first("perfusion")
+        if perf is not None:
+            inputs["perfusion_map"] = perf
+
+    m0 = _load_first("m0")
+    if m0 is not None:
+        inputs["m0"] = m0
+        inputs["m0_type"] = "separate"
+    asl_p = _first("asl")
+    if asl_p and load_arrays:
+        arr = np.asanyarray(nib.load(asl_p).dataobj).astype(float)
+        if arr.ndim == 4:
+            inputs["asl_4d"] = arr
+            inputs["delta_m_4d"] = arr
+        inputs["asl_shape"] = tuple(int(s) for s in arr.shape)
+    return inputs

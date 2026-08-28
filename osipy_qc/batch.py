@@ -77,20 +77,24 @@ def check_label(check: str) -> str:
     return CHECK_LABELS.get(check, check)
 
 
-def stream_b_checks() -> list[str]:
-    """The CBF-map QC checks. A cohort of CBF maps is graded against these, so a
-    clean map can genuinely PASS rather than being dragged to WARN by the raw-data
-    checks that have no input to run on."""
+def stream_b_checks(organ: str = "brain") -> list[str]:
+    """The CBF-map QC checks for one organ. A cohort of CBF maps is graded against
+    these, so a clean map can genuinely PASS rather than being dragged to WARN by
+    the raw-data checks that have no input to run on.
+
+    Scoped to an organ since kidney and placenta arrived: unscoped, this returned
+    the brain's Stream B plus the kidney's, and a brain upload was measured
+    against a cortico-medullary ratio it can never have."""
     from .core.registry import all_checks
-    return [name for name, e in all_checks().items() if e.get("stream") == "B"]
+    return [name for name, e in all_checks(organ).items() if e.get("stream") == "B"]
 
 
-def cbf_map_checks() -> list[str]:
+def cbf_map_checks(organ: str = "brain") -> list[str]:
     """Stream B minus coregistration — the right set for a cohort of CBF maps with
     no T1. Coregistration needs both an ASL and a structural mask, which the CBF
     loader never has, so including it would only add an UNKNOWN and drag every
     subject to WARN. Callers who do have T1 masks can pass `checks=` explicitly."""
-    return [c for c in stream_b_checks() if c != "4.1.coregistration"]
+    return [c for c in stream_b_checks(organ) if c != "4.1.coregistration"]
 
 
 @dataclass

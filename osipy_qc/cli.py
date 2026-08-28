@@ -49,6 +49,60 @@ def _print_report(report) -> None:
     print()
 
 
+def _organ_demo_inputs(organ: str):
+    """Inputs + config for `--organ-demo`, from a phantom of known quality.
+
+    Exists so a user can see what an organ's report looks like without owning
+    any data of that organ - which matters most for kidney and placenta, where
+    openly shareable data barely exists.
+    """
+    import numpy as np
+
+    from .core.config import QCConfig
+    cfg = QCConfig(organ=organ)
+    if organ == "kidney":
+        from .synth import synthetic_kidney_case
+        c = synthetic_kidney_case(quality="clean", seed=0)
+        rng = np.random.default_rng(0)
+        dm4 = np.stack([c.delta_m + rng.normal(0, 3, c.delta_m.shape) for _ in range(12)], -1)
+        return dict(
+            rbf_map=c.rbf, m0=c.m0, delta_m=c.delta_m, delta_m_4d=dm4,
+            kidney_masks=c.kidney_masks, cortex_masks=c.cortex_masks,
+            medulla_masks=c.medulla_masks, units="mL/100g/min", pld_or_ti_s=1.4,
+            voxel_mm=(2.0, 2.0, 8.0), affine=np.diag([2.0, 2.0, 8.0, 1.0]),
+            m0_type="separate", m0_tr_s=6.0, m0_background_suppression=False,
+            m0_labelling_applied=False, breathing_strategy="free breathing",
+            readout="3D", files=[{"name": "ASL_RBF.nii.gz"}],
+            sidecar={"ArterialSpinLabelingType": "pCASL", "MagneticFieldStrength": 3,
+                     "PostLabelingDelay": 1.4},
+            context={"labelling": "pCASL", "field_strength_t": 3, "readout": "3D"},
+        ), cfg
+    if organ == "placenta":
+        from .synth import synthetic_placenta_case
+        c = synthetic_placenta_case(quality="clean", seed=0)
+        rng = np.random.default_rng(0)
+        dm4 = np.stack([c.perfusion / 50 + rng.normal(0, 0.3, c.perfusion.shape)
+                        for _ in range(16)], -1)
+        return dict(
+            perfusion_map=c.perfusion, placenta_mask=c.placenta_mask, m0=c.m0,
+            delta_m_4d=dm4, asl_source_4d=dm4, declared_units="mL/100g/min",
+            quantified=True,
+            constants={"lambda": 0.9, "alpha": 0.767, "t1_blood_ms": 1650},
+            field_strength_T=3, labelling_scheme="VSASL",
+            scheme_params={"cutoff_velocity_cm_s": 1.6},
+            gestational_age_wk=30, maternal_position="lateral",
+            mask_source="manual, single rater", roi_definition="whole placenta",
+            m0_labelled=False, m0_background_suppressed=False,
+            asl_background_suppressed=True, normalisation_mode="scalar",
+            registration_model="non-rigid (DSVR)", tr_s=6.0,
+            context={"cohort_comparable": True},
+        ), cfg
+    from .synth import synthetic_case
+    c = synthetic_case(quality="clean", seed=0)
+    return dict(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf, brain=c.brain,
+                voxel_mm=c.voxel_mm), cfg
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="osipy_qc", description="ASL QC ToolBox")
     ap.add_argument("folder", nargs="?", help="folder of raw NIfTIs to QC")
@@ -60,6 +114,12 @@ def main(argv=None) -> int:
                     help="write a self-contained visual HTML report to PATH")
     ap.add_argument("--population", default="adult",
                     help="population for the CBF bands: adult or neonate (default: adult)")
+    ap.add_argument("--organ", default="brain", choices=["brain", "kidney", "placenta"],
+                    help="which organ's check set to run (default: brain). Each organ has "
+                         "its own checks: brain 20, kidney 19, placenta 15.")
+    ap.add_argument("--organ-demo", metavar="ORGAN",
+                    choices=["brain", "kidney", "placenta"],
+                    help="run that organ's checks on a synthetic phantom of known quality")
     ap.add_argument("--serve", action="store_true",
                     help="local web UI: upload a single CBF map in the browser")
     ap.add_argument("--dashboard", metavar="FOLDER",
@@ -102,15 +162,24 @@ def main(argv=None) -> int:
         serve(host=args.host, port=args.port, open_browser=not args.no_browser)
         return 0
 
+    from dataclasses import replace as _replace
+
     from .core.config import for_population
     try:
-        cfg = for_population(args.population)
+        cfg = _replace(for_population(args.population), organ=args.organ)
     except ValueError as exc:
         ap.error(str(exc))
         return 2
 
+    if args.organ_demo:
+        report = run_qc(*_organ_demo_inputs(args.organ_demo))
+        _print_report(report)
+        if args.json:
+            print(report.to_json())
+        return 0
+
     if args.demo:
-        from .synth import synthetic_case
+        from .synth import synthetic_case  # noqa: F401
         c = synthetic_case(quality="clean", seed=0)
         inputs = {"cbf": c.cbf, "gm": c.gm, "wm": c.wm, "csf": c.csf,
                   "brain": c.brain, "voxel_mm": c.voxel_mm}

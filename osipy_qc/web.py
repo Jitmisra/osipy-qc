@@ -42,6 +42,8 @@ import traceback
 import webbrowser
 
 from ._webassets import BASE_CSS, brand, esc
+from dataclasses import replace
+
 from .core.config import POPULATIONS, for_population
 from .report import run_qc
 
@@ -264,8 +266,25 @@ def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
     )
 
 
+_ORGAN_ORDER = ["brain", "kidney", "placenta"]
+_ORGAN_NOTE = {
+    "brain": "20 checks. QEI, tissue-based CBF bands, motion.",
+    "kidney": "19 checks. Needs per-kidney masks (left and right separately); the renal "
+              "consensus reports CORTICAL perfusion per kidney.",
+    "placenta": "15 checks. Needs a placenta mask, declared units and gestational age.",
+}
+
+
 def _upload_page(error: str = "") -> str:
     pops = [p for p in _POP_ORDER if p in POPULATIONS]
+    from .core.registry import organs_covered
+    counts = organs_covered()
+    organ_seg = "".join(
+        f'<label><input type="radio" name="organ" value="{o}"'
+        f'{" checked" if o == "brain" else ""}>'
+        f'<span title="{esc(_ORGAN_NOTE[o])}">{o} ({counts.get(o, 0)})</span></label>'
+        for o in _ORGAN_ORDER
+    )
     seg = "".join(
         f'<label><input type="radio" name="population" value="{p}"'
         f'{" checked" if p == "adult" else ""}>'
@@ -356,6 +375,15 @@ def _upload_page(error: str = "") -> str:
         demote those to a WARN.</span>
       </label>
     </details>
+
+    <div class="field-label">Organ <span class="opt">each organ has its own checks</span></div>
+    <div class="seg">{organ_seg}</div>
+    <p class="hint"><b>Brain</b> is the v1.0 target. <b>Kidney</b> and <b>placenta</b> are
+       implemented from their design documents but their thresholds are almost all
+       <b>uncalibrated</b> &mdash; there is no renal or placental equivalent of the QEI cut-off.
+       Both need <b>masks</b> you supply: kidney wants left and right separately, placenta wants
+       one placental mask. Without masks most of their checks report UNKNOWN rather than
+       guessing.</p>
 
     <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
     <div class="seg">{seg}</div>
@@ -582,7 +610,7 @@ def _remember_upload(subject) -> str:
     return token
 
 
-def _checks_for(has_cbf: bool, has_raw: bool) -> list[str]:
+def _checks_for(has_cbf: bool, has_raw: bool, organ: str = "brain") -> list[str]:
     """The check set the supplied inputs justify.
 
     Running the whole registry regardless is what made a flawless CBF map WARN:
@@ -597,10 +625,10 @@ def _checks_for(has_cbf: bool, has_raw: bool) -> list[str]:
         # 4.1 needs an ASL mask AND a structural mask, and no loader in the package
         # produces either, so including it only ever reports a missing check that
         # no upload can supply.
-        return [n for n in all_checks() if n != "4.1.coregistration"]
+        return [n for n in all_checks(organ) if n != "4.1.coregistration"]
     if has_raw:
-        return [n for n, e in all_checks().items() if e.get("stream") == "A"]
-    return cbf_map_checks()
+        return [n for n, e in all_checks(organ).items() if e.get("stream") == "A"]
+    return cbf_map_checks(organ)
 
 
 def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
@@ -616,7 +644,10 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
     cbf_name, cbf_bytes = fields.get("cbf", ("", b""))
 
     population = (fields.get("population", ("", b"adult"))[1] or b"adult").decode()
-    cfg = for_population(population)
+    organ = (fields.get("organ", ("", b"brain"))[1] or b"brain").decode()
+    if organ not in ("brain", "kidney", "placenta"):
+        organ = "brain"
+    cfg = replace(for_population(population), organ=organ)
 
     # Threshold overrides from the form. Anything left blank keeps the packaged
     # value, and a field that is not a number is ignored rather than silently
@@ -729,12 +760,14 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
                              "files, or both.")
 
         if saved_raw:
-            from .io import load_folder
+            from .io import load_folder, load_organ_folder
             # the CBF-derived inputs win where the two overlap; the raw folder
             # only adds what it alone can know
-            inputs = {**load_folder(raw_dir), **inputs}
+            loaded = (load_organ_folder(raw_dir, organ) if organ != "brain"
+                      else load_folder(raw_dir))
+            inputs = {**loaded, **inputs}
         report = run_qc(inputs, cfg=cfg,
-                        checks=_checks_for(bool(paths["cbf"]), saved_raw))
+                        checks=_checks_for(bool(paths["cbf"]), saved_raw, organ))
 
         from .api import subject_payload
         from .batch import Subject

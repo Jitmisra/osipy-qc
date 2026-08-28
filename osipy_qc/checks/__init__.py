@@ -10,5 +10,8 @@ from . import motion     # noqa: F401  (Module 7)
 from . import noise      # noqa: F401  (Module 2)
 from . import qei        # noqa: F401  (Module 1)
 from . import schema     # noqa: F401  (Module 5 + 8.2)
+from . import kidney     # noqa: F401  (organ="kidney": modules K1-K7)
+from . import placenta   # noqa: F401  (organ="placenta": modules P1-P6)
 
-__all__ = ["qei", "noise", "cbf_level", "coreg", "schema", "m0", "motion"]
+__all__ = ["qei", "noise", "cbf_level", "coreg", "schema", "m0", "motion",
+           "kidney", "placenta"]

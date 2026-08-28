@@ -64,7 +64,10 @@ def run_qc(inputs: dict, cfg: QCConfig | None = None,
     """
     cfg = cfg or QCConfig()
     results: list[CheckResult] = []
-    for name, entry in all_checks().items():
+    # Only the checks registered for this organ. A kidney graded by the brain's
+    # checks would be scored against a grey-matter spatial prior, which is not a
+    # wrong number so much as a meaningless one.
+    for name, entry in all_checks(cfg.organ).items():
         if checks is not None and name not in checks:
             continue
         try:

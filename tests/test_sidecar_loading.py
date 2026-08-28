@@ -23,6 +23,11 @@ def _write_nifti(tmp_path, name, shape, voxel=(3.4, 3.4, 6.0)):
     nib.save(nib.Nifti1Image(arr, aff), str(tmp_path / name))
 
 
+def _write_nifti_int(tmp_path, name, arr, voxel=(3.4, 3.4, 6.0)):
+    aff = np.diag(list(voxel) + [1.0])
+    nib.save(nib.Nifti1Image(arr.astype(np.int16), aff), str(tmp_path / name))
+
+
 def _challenge_like_folder(tmp_path):
     """Mimic sub-PopulationAverage: 4D ASL + M0 + asl.json + m0scan.json + aslcontext."""
     _write_nifti(tmp_path, "sub-X_asl.nii.gz", (8, 8, 4, 6))
@@ -283,3 +288,73 @@ def test_motion_reason_names_too_few_volumes_not_nonfinite():
     assert r.verdict == Verdict.UNKNOWN
     assert "fewer than 2 volumes" in r.reason
     assert "entirely non-finite" not in r.reason
+
+
+# --------------------------------------------------------------------------- #
+# Organ-aware loading (kidney / placenta)
+# --------------------------------------------------------------------------- #
+
+def test_classify_organ_file_routes_masks_before_images():
+    """A renal dataset ships files whose names carry no modality token at all;
+    reading those as images is how a mask gets graded as a perfusion map."""
+    from osipy_qc.io import classify_organ_file as c
+    assert c("kidney_mask_left.nii.gz") == ("kidney_mask", "left")
+    assert c("left_cortex.nii.gz") == ("cortex_mask", "left")
+    assert c("rkidney_medulla.nii.gz") == ("medulla_mask", "right")
+    assert c("placenta_mask.nii.gz") == ("placenta_mask", None)
+    assert c("ASL_RBF.nii.gz") == ("perfusion", None)
+    assert c("ASL_M0.nii.gz") == ("m0", None)
+    assert c("T1w.nii.gz") == ("other", None)
+
+
+def test_a_combined_label_map_is_not_read_as_a_cortex_mask():
+    """REAL-DATA (renaldro / iBEAt): Label_Map_cortex_medulla.nii.gz holds
+    0=background, 1=cortex, 2=medulla. Classifying it as 'cortex' would silently
+    grade the medullary voxels as cortex."""
+    from osipy_qc.io import classify_organ_file as c
+    assert c("Label_Map_cortex_medulla.nii.gz") == ("cortex_medulla_labelmap", None)
+
+
+def test_load_organ_folder_unpacks_a_combined_label_map(tmp_path):
+    lab = np.zeros((8, 8, 4), dtype=np.int16)
+    lab[1:4, 1:4, 1:3] = 1                      # cortex
+    lab[5:7, 5:7, 1:3] = 2                      # medulla
+    _write_nifti_int(tmp_path, "Label_Map_cortex_medulla.nii.gz", lab)
+    _write_nifti(tmp_path, "ASL_RBF.nii.gz", (8, 8, 4))
+    _write_nifti(tmp_path, "ASL_M0.nii.gz", (8, 8, 4))
+    from osipy_qc.io import load_organ_folder
+    inp = load_organ_folder(str(tmp_path), "kidney")
+    assert inp["cortex_masks"]["single"].sum() == 18
+    assert inp["medulla_masks"]["single"].sum() == 8
+    assert inp["kidney_masks"]["single"].sum() == 26
+    assert "combined label map" in inp["mask_note"]
+    assert inp["rbf_map"].shape == (8, 8, 4)
+    assert inp["m0"].shape == (8, 8, 4)
+
+
+def test_load_organ_folder_never_invents_a_mask(tmp_path):
+    """There is no renal equivalent of 'just run BET on it'. A folder with no
+    mask must load fine and simply produce UNKNOWNs."""
+    _write_nifti(tmp_path, "ASL_RBF.nii.gz", (8, 8, 4))
+    from osipy_qc.io import load_organ_folder
+    inp = load_organ_folder(str(tmp_path), "kidney")
+    assert "cortex_masks" not in inp and "kidney_masks" not in inp
+    assert inp["rbf_map"].shape == (8, 8, 4)
+
+
+def test_load_organ_folder_placenta(tmp_path):
+    mask = np.zeros((8, 8, 4), dtype=np.int16)
+    mask[2:6, 2:6, 1:3] = 1
+    _write_nifti_int(tmp_path, "placenta_mask.nii.gz", mask)
+    _write_nifti(tmp_path, "perfusion.nii.gz", (8, 8, 4))
+    from osipy_qc.io import load_organ_folder
+    inp = load_organ_folder(str(tmp_path), "placenta")
+    assert inp["placenta_mask"].sum() == 32
+    assert inp["perfusion_map"].shape == (8, 8, 4)
+
+
+def test_load_organ_folder_falls_back_to_the_brain_loader(tmp_path):
+    _write_nifti(tmp_path, "PCASL.nii.gz", (8, 8, 4, 6))
+    from osipy_qc.io import load_organ_folder
+    inp = load_organ_folder(str(tmp_path), "brain", load_arrays=False)
+    assert "detected" in inp                     # the brain loader's own shape

@@ -201,10 +201,15 @@ def test_raw_only_upload_runs_only_the_stream_a_checks(raw_series):
     registry would report every CBF-map check as a gap in a report that was never
     given a CBF map."""
     from osipy_qc.core.registry import all_checks
-    stream_a = [n for n, e in all_checks().items() if e.get("stream") == "A"]
+    # scoped to brain: the registry also holds the kidney and placenta checks,
+    # and the upload console grades brain
+    stream_a = [n for n, e in all_checks("brain").items() if e.get("stream") == "A"]
     data = _grade(_browser_body({}, raw={"PCASL.nii.gz": raw_series}))
     assert data["nChecks"] == len(stream_a)
     assert [c["id"] for c in data["checks"] if c["stream"] == "B"] == []
+    # and no other organ's checks leak into a brain report - a kidney check
+    # given brain inputs would return UNKNOWN and read as a gap in coverage
+    assert [c["id"] for c in data["checks"] if c["id"].startswith(("k", "p"))] == []
 
 
 def test_raw_only_coverage_does_not_count_the_cbf_checks_as_missing(raw_series):

@@ -143,6 +143,70 @@ class QCConfig:
     post_labeling_delay_s: float | None = None  # PLD
     t1_blood_s: float | None = None            # 1.65 s @3T adult; differs in neonates (hematocrit)
 
+    # ---- Kidney (organ="kidney") -------------------------------------------
+    # Nery F, et al. MAGMA 2020;33(1):141-161 is the renal consensus and the
+    # renal equivalent of the White Paper. It contains 59 statements and ZERO
+    # numeric quality thresholds - no tSNR cutoff, no CoV cutoff, no motion
+    # limit, no QEI equivalent. So almost every number below is UNCALIBRATED by
+    # necessity, not by laziness, and none of them may drive a FAIL alone.
+    kidney_rbf_sanity_lo: float = 50.0     # UNCALIBRATED - "cannot be renal cortex", not "unhealthy"
+    kidney_rbf_sanity_hi: float = 500.0    # UNCALIBRATED - twin of the K2.3 ceiling
+    kidney_implausible_ceiling: float = 500.0   # IMPLEMENTATION - one study's preprocessing clip
+    kidney_frac_warn: float = 0.05         # UNCALIBRATED - tighter than the brain's 10%
+    kidney_frac_fail: float = 0.20         # UNCALIBRATED number, DEFINITION licence (sign)
+    kidney_min_roi_voxels: int = 20        # UNCALIBRATED
+    kidney_pws_lo: float = 0.5             # UNCALIBRATED - band drawn to hold the published spread
+    kidney_pws_hi: float = 8.0             # UNCALIBRATED
+    kidney_cmr_trip: float = 1.5           # UNCALIBRATED - below this the masks are suspect
+    kidney_min_medulla_voxels: int = 10    # UNCALIBRATED
+    kidney_asymmetry_tol: float = 0.20     # UNCALIBRATED - review flag, never a rejection
+    kidney_mask_component_frac: float = 0.95    # DEFINITION - one dominant connected component
+    kidney_min_cortex_voxels: int = 50     # UNCALIBRATED
+    kidney_slice_usable_pass: float = 0.80      # UNCALIBRATED
+    kidney_slice_usable_warn: float = 0.50      # UNCALIBRATED
+    kidney_min_slice_voxels: int = 20      # DEFINITION - a slice must hold enough mask to judge
+    kidney_slice_finite_frac: float = 0.90      # DEFINITION
+    kidney_displacement_vox: float = 1.0   # UNCALIBRATED - median inter-frame CC displacement
+    kidney_through_plane_frac: float = 0.25     # UNCALIBRATED
+    kidney_outlier_sd: float = 2.0         # IMPLEMENTATION - Harteveld's +/-2 SD rule
+    kidney_outlier_voxel_frac: float = 0.20     # IMPLEMENTATION - "more than 20% of voxels"
+    kidney_max_rejected_pairs: int = 2     # UNCALIBRATED
+    kidney_min_surviving_pairs: int = 2    # DEFINITION - fewer than 2 leaves nothing to average
+    kidney_min_pairs_2d: int = 20          # PUBLISHED - consensus default for 2D readouts
+    kidney_min_repetitions: int = 3        # DEFINITION - a temporal SD needs 3 points
+
+    # ---- Placenta (organ="placenta") ---------------------------------------
+    # Taso 2023 (ISMRM Perfusion Study Group) is the nearest thing to a placental
+    # reference, and the placenta has neither Recommendations nor summarised
+    # practice in it. There is even less published ground here than for kidney,
+    # so the numbers below are engineering defaults except where marked.
+    placenta_neg_frac_warn: float = 0.10        # UNCALIBRATED
+    placenta_upper_frac_warn: float = 0.05      # UNCALIBRATED
+    placenta_nonfinite_fail: float = 0.50       # DEFINITION - a mostly-absent map
+    placenta_iqr_multiplier: float = 3.0        # IMPLEMENTATION - Tukey fence, widened
+    placenta_min_roi_voxels: int = 50           # UNCALIBRATED
+    placenta_segment_size: int = 3              # IMPLEMENTATION - 3x3 in-plane segments
+    placenta_min_segments: int = 20             # DEFINITION
+    placenta_mask_component_frac: float = 0.95  # IMPLEMENTATION - the placenta is one organ
+    placenta_holes_frac_warn: float = 0.05      # UNCALIBRATED
+    placenta_edge_voxel_frac: float = 0.02      # UNCALIBRATED - mask on a slab face
+    placenta_covered_frac: float = 0.90         # UNCALIBRATED
+    placenta_ga_min_wk: float = 14.0            # PUBLISHED - the studied gestational range
+    placenta_ga_max_wk: float = 41.0            # PUBLISHED
+    placenta_outlier_sd: float = 1.5            # IMPLEMENTATION
+    placenta_outlier_voxel_frac: float = 0.20   # IMPLEMENTATION
+    placenta_rejected_frac_warn: float = 0.154  # IMPLEMENTATION
+    placenta_rejected_frac_severe: float = 0.269   # IMPLEMENTATION
+    placenta_min_surviving_pairs: int = 4       # DEFINITION
+    placenta_good_surviving_pairs: int = 8      # IMPLEMENTATION
+    placenta_tsd_warn_pct: float = 9.8          # IMPLEMENTATION - reference 6.7 +/- 3.1%
+    placenta_ncc_pass: float = 0.75             # IMPLEMENTATION
+    placenta_ssim_pass: float = 0.6             # IMPLEMENTATION
+    placenta_ssim_kernel_mm: float = 20.0       # IMPLEMENTATION
+    placenta_bad_volume_frac: float = 0.10      # IMPLEMENTATION
+    placenta_contraction_drop: float = 0.10     # IMPLEMENTATION - >10% area drop
+    placenta_min_volumes_contraction: int = 5   # DEFINITION
+
 
 # ---------------------------------------------------------------------------
 # Provenance: field name -> (level, citation, what the source actually says)
@@ -334,6 +398,126 @@ THRESHOLD_PROVENANCE: dict[str, tuple[Provenance, str, str]] = {
         "Power JD, et al. NeuroImage 2012;59(3):2142-2154. doi:10.1016/j.neuroimage.2011.10.018",
         'Verbatim: "converted from degrees to millimeters by calculating displacement on the '
         'surface of a sphere of radius 50 mm." This is a DEFINITION, not a threshold.',
+    ),
+    "kidney_rbf_sanity_lo": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "50 appears in no paper. The band encodes 'this cannot be renal cortical perfusion', not 'this is not healthy perfusion'. Odudu A, et al. Nephrol Dial Transplant 2018;33(suppl_2):ii15-ii21 (renal ASL systematic review) reports a 139-427 spread of study-level cohort MEANS in healthy volunteers and 83-412 in patients - the two overlap almost entirely, so that spread has near-zero discriminative power and is NOT used as a band.",
+    ),
+    "kidney_rbf_sanity_hi": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Deliberately wide upper sanity edge, coinciding with the K2.3 ceiling. No per-scan reference interval exists: the PET reference standard itself disagrees by +/-136 mL/min/100 mL (Olsen 2025), which is why no accuracy-based band is defensible.',
+    ),
+    "kidney_implausible_ceiling": (
+        Provenance.IMPLEMENTATION,
+        "one study's segmentation preprocessing clip",
+        "A per-voxel preprocessing clip inside one study's segmentation step, not a validated scan-level quality bound. Context only: whole-kidney flow ~1200 mL/min is about 400 mL/100g/min for a 300 g kidney - which makes 500 plausible as an impossibility line, not as a normal bound.",
+    ),
+    "kidney_frac_warn": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "Nobody publishes 'reject the scan if X% of cortical voxels are negative'. Carried over in spirit from the brain module (10%) and TIGHTENED to 5% because renal cortical ROIs are small (a few hundred voxels), so a 5% excursion is a real count, not rounding.",
+    ),
+    "kidney_frac_fail": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'The 20% is uncalibrated; the FAIL is licensed by the SIGN, not by the number - a majority-negative perfusion map is not a perfusion map. Physical-impossibility branch.',
+    ),
+    "kidney_pws_lo": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "Band drawn to contain the full published spread, not fitted. Measured cortical PWS is ~2.95-3.09% (garciaruiz2025, n=16); a band anchored on the review's oft-quoted 5% (odudu2018) would be wrong in the common case.",
+    ),
+    "kidney_pws_hi": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Upper edge holds the FAIR-at-optimal-TI peak of 5.98 +/- 0.70% (bones2021) with margin. PWS falls ~3x between PLD 0.5 s and 1.5 s in the same subjects (harteveld2022), so the band is only applied when the PLD/TI is known.',
+    ),
+    "kidney_cmr_trip": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "Measured cortex:medulla clusters at 2.26-2.59, so 1.5 sits well below every reported value. It is a SEGMENTATION-INTEGRITY trip point, never a perfusion verdict: Nery F, et al. MAGMA 2020;33(1):141-161. doi:10.1007/s10334-019-00800-z (PARENCHIMA renal ASL consensus) R10.2 (89% agreement) says medullary values 'are not considered reliable with current measurement approaches', which forbids grading perfusion on the medullary half.",
+    ),
+    "kidney_asymmetry_tol": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'A review flag, never a rejection. Published null result: no significant left-right difference in cortical RBF (P=0.93 FAIR, P=0.52 pCASL, harteveld2020). Normal left>right bias of ~0.5-6.8% and a between-visit CV of 4-13% (odudu2018) set the floor below which a tolerance would only measure noise.',
+    ),
+    "kidney_mask_component_frac": (
+        Provenance.IMPLEMENTATION,
+        'geometric definition',
+        'A kidney is one connected object; a mask that is 95% one component and 5% scattered elsewhere has stray voxels. This is a shape fact, not a quality threshold.',
+    ),
+    "kidney_min_cortex_voxels": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Below ~50 voxels a cortical mean is dominated by partial-volume mixing with medulla, which biases cortical RBF downward (a fact about voxel size, not data quality).',
+    ),
+    "kidney_slice_usable_pass": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'No published usable-slice fraction exists for renal ASL. 0.8/0.5 are engineering bands.',
+    ),
+    "kidney_displacement_vox": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Context only, NOT the source of the number: 4D-CT measures kidney excursion at 11.1 +/- 4.8 mm cranio-caudal, and Tan 2014 uses an 8 mm navigator acceptance window. Those are millimetres of true motion, not a residual-after-correction tolerance, so they cannot be used as this threshold.',
+    ),
+    "kidney_through_plane_frac": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Through-plane motion cannot be corrected by in-plane registration, so its share of the total is reported; 0.25 is an engineering line.',
+    ),
+    "kidney_outlier_sd": (
+        Provenance.IMPLEMENTATION,
+        'Harteveld et al., renal ASL outlier rejection',
+        "'Reject the pair if more than 20% of kidney voxels deviate more than +/-2 SD.' Three further published variants exist (Bones' 80%-within-2SD, Harteveld's paediatric 1.5 SD, Garcia-Ruiz's 2SD-plus-RMSE); this is the default, and the rule used is named in the metric so a report never hides which one produced the count.",
+    ),
+    "kidney_outlier_voxel_frac": (
+        Provenance.IMPLEMENTATION,
+        'Harteveld et al., renal ASL outlier rejection',
+        "The '20% of voxels' half of the same published rule.",
+    ),
+    "kidney_max_rejected_pairs": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'The rejection RULE is published; how many rejections make a scan bad is not.',
+    ),
+    "kidney_min_pairs_2d": (
+        Provenance.PUBLISHED,
+        'Nery F, et al. MAGMA 2020;33(1):141-161. doi:10.1007/s10334-019-00800-z (PARENCHIMA renal ASL consensus)',
+        'The consensus default number of repetitions for a 2D renal readout; falling below it means the acquisition no longer matches what the consensus assumed.',
+    ),
+    "placenta_implausible_ceiling": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'No placental perfusion ceiling is published. Reported placental values span 176 +/- 91 (Zun, VSASL) to 249-336 across gestation, in units that differ between studies, so the ceiling is a wide impossibility line and the units check (P2.1) gates it.',
+    ),
+    "placenta_frac_warn": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'As for kidney: no published negative-fraction rule exists for any organ.',
+    ),
+    "placenta_frac_fail": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Number uncalibrated; the FAIL is licensed by the sign, not by the 20%.',
+    ),
+    "placenta_outlier_sd": (
+        Provenance.IMPLEMENTATION,
+        'placental ASL practice (per-pair subtraction rejection)',
+        'The one implementable published rule family for placenta, mirroring the renal rule.',
+    ),
+    "placenta_mask_component_frac": (
+        Provenance.IMPLEMENTATION,
+        'geometric definition',
+        "The placenta is one organ; a mask in many pieces is a segmentation failure. Slightly looser than the kidney's 0.95 because a placental mask legitimately thins at its edges.",
+    ),
+    "placenta_ga_min_wk": (
+        Provenance.IMPLEMENTATION,
+        'gestational plausibility',
+        'A stated GA outside 10-42 weeks is a data-entry error, not a physiological finding. Perfusion changes across gestation, so a verdict without GA is not interpretable.',
     ),
 }
 
