@@ -57,7 +57,73 @@ TUNABLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
 
 # Flat {name: label} view, derived from the groups - the allow-list that
 # cfg_from_params tunes and the drawer renders.
-TUNABLE: dict[str, str] = {n: lab for _, fields in TUNABLE_GROUPS for n, lab in fields}
+# The kidney and placenta thresholds, grouped for the same editor. They are kept
+# separate from the brain's because they are not alternatives to it - a kidney
+# has no GM/WM ratio and a placenta has no QEI, so showing the brain's groups
+# under a renal heading would offer the reader controls that grade nothing.
+#
+# Almost every number here is UNCALIBRATED (the renal consensus states 59 rules
+# and zero quality thresholds; the placenta has no consensus document at all),
+# which is exactly why they are exposed for editing: they are engineering
+# defaults awaiting calibration, not settled science.
+KIDNEY_TUNABLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Cortical RBF sanity bound", [("kidney_rbf_sanity_lo", "min"),
+                                   ("kidney_rbf_sanity_hi", "max")]),
+    ("Implausible values", [("kidney_implausible_ceiling", "ceiling"),
+                            ("kidney_frac_warn", "warn frac"),
+                            ("kidney_frac_fail", "fail frac")]),
+    ("Perfusion-weighted signal", [("kidney_pws_lo", "min %"), ("kidney_pws_hi", "max %")]),
+    ("Cortico-medullary ratio", [("kidney_cmr_trip", "trip point")]),
+    ("Left-right", [("kidney_asymmetry_tol", "tolerance")]),
+    ("Masks", [("kidney_mask_component_frac", "one-object frac"),
+               ("kidney_min_cortex_voxels", "min cortex vox"),
+               ("kidney_min_roi_voxels", "min ROI vox")]),
+    ("Slice coverage", [("kidney_slice_usable_pass", "pass"),
+                        ("kidney_slice_usable_warn", "warn")]),
+    ("Respiratory motion", [("kidney_displacement_vox", "CC median vox"),
+                            ("kidney_through_plane_frac", "through-plane")]),
+    ("Outlier rejection", [("kidney_outlier_sd", "SD"),
+                           ("kidney_outlier_voxel_frac", "voxel frac"),
+                           ("kidney_max_rejected_pairs", "max rejected"),
+                           ("kidney_min_pairs_2d", "min pairs (2D)")]),
+]
+
+PLACENTA_TUNABLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Implausible values", [("placenta_neg_frac_warn", "negative warn"),
+                            ("placenta_upper_frac_warn", "upper warn"),
+                            ("placenta_nonfinite_fail", "non-finite fail"),
+                            ("placenta_iqr_multiplier", "IQR multiplier")]),
+    ("Mask & slab", [("placenta_mask_component_frac", "one-object frac"),
+                     ("placenta_holes_frac_warn", "holes warn"),
+                     ("placenta_edge_voxel_frac", "slab-edge frac"),
+                     ("placenta_covered_frac", "coverage")]),
+    ("Gestational age", [("placenta_ga_min_wk", "min wk"), ("placenta_ga_max_wk", "max wk")]),
+    ("Outlier rejection", [("placenta_outlier_sd", "SD"),
+                           ("placenta_outlier_voxel_frac", "voxel frac"),
+                           ("placenta_rejected_frac_warn", "rejected warn"),
+                           ("placenta_min_surviving_pairs", "min surviving")]),
+    ("Temporal stability", [("placenta_tsd_warn_pct", "temporal SD %")]),
+    ("Registration residual", [("placenta_ncc_pass", "NCC"),
+                               ("placenta_ssim_pass", "local SSIM"),
+                               ("placenta_bad_volume_frac", "bad-volume frac")]),
+    ("Contractions", [("placenta_contraction_drop", "area drop")]),
+]
+
+TUNABLE_GROUPS_BY_ORGAN: dict[str, list] = {
+    "brain": TUNABLE_GROUPS,
+    "kidney": KIDNEY_TUNABLE_GROUPS,
+    "placenta": PLACENTA_TUNABLE_GROUPS,
+}
+
+
+def tunable_groups(organ: str = "brain") -> list:
+    """The threshold groups that actually grade this organ."""
+    return TUNABLE_GROUPS_BY_ORGAN.get(organ, TUNABLE_GROUPS)
+
+
+TUNABLE: dict[str, str] = {n: lab
+                           for groups in TUNABLE_GROUPS_BY_ORGAN.values()
+                           for _, fields in groups for n, lab in fields}
 
 # Map a check id to a short human name for the ledger / artifact breakdown.
 CHECK_LABELS: dict[str, str] = {

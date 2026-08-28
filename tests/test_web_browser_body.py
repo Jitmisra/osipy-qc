@@ -321,3 +321,99 @@ def test_uppercase_sidecar_does_not_kill_the_upload(raw_series):
     }))
     ids = {c["id"]: c for c in data["checks"]}
     assert ids["5.1.schema"]["verdict"] == "PASS", ids["5.1.schema"]["reason"]
+
+
+# --------------------------------------------------------------------------
+# The console must actually be usable for kidney and placenta
+# --------------------------------------------------------------------------
+
+def _nii_bytes_affine(arr, voxel=(2.0, 2.0, 8.0)):
+    import numpy as _np
+    with tempfile.TemporaryDirectory() as t:
+        p = os.path.join(t, "x.nii.gz")
+        nib.save(nib.Nifti1Image(_np.asarray(arr, dtype=_np.float32),
+                                 _np.diag(list(voxel) + [1.0])), p)
+        with open(p, "rb") as fh:
+            return fh.read()
+
+
+def _organ_body(files: dict, facts: dict, organ: str) -> bytes:
+    body = b""
+    for field, blob in files.items():
+        body += _part(field, f"{field}.nii.gz", blob)
+    for key, val in facts.items():
+        body += _part(f"{organ}__{key}", data=str(val).encode())
+    body += _part("organ", data=organ.encode()) + _part("population", data=b"adult")
+    body += _part("files", "", b"") * 2
+    return body + b"--" + BOUNDARY.encode() + b"--\r\n"
+
+
+def test_kidney_upload_reaches_its_checks_not_just_one():
+    """Before the organ sections existed, a kidney upload had nowhere to put its
+    masks or its acquisition facts, so the console reached ONE of the nine
+    CBF-map checks and reported the other eight as gaps."""
+    from osipy_qc.synth import synthetic_kidney_case
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    files = {"cbf": _nii_bytes_affine(c.rbf)}
+    for side in ("left", "right"):
+        files[f"kidney__kidney_{side}"] = _nii_bytes_affine(c.kidney_masks[side])
+        files[f"kidney__cortex_{side}"] = _nii_bytes_affine(c.cortex_masks[side])
+        files[f"kidney__medulla_{side}"] = _nii_bytes_affine(c.medulla_masks[side])
+    facts = {"units": "mL/100g/min", "labelling": "pCASL", "pld_or_ti_s": "1.4",
+             "field_strength_t": "3", "breathing_strategy": "free breathing", "readout": "3D"}
+    data = _grade(_organ_body(files, facts, "kidney"))
+    ids = {c_["id"]: c_ for c_ in data["checks"]}
+    assert data["coverage"]["graded"] >= 4
+    # the consensus quantity, per kidney, actually computed
+    assert ids["k3.1.cortical_rbf"]["verdict"] == "INFO"
+    assert "300" in ids["k3.1.cortical_rbf"]["reason"]
+    assert ids["k3.3.left_right"]["verdict"] == "PASS"
+    assert ids["k4.1.mask_integrity"]["verdict"] == "PASS"
+    # and no brain check leaks in
+    assert not [i for i in ids if i[0].isdigit()]
+
+
+def test_placenta_upload_can_declare_its_units_and_context():
+    """P2.1 gates every magnitude check on a declared unit and P4.2 needs the
+    gestational age. With no fields for either, a placenta upload could never
+    get past them."""
+    from osipy_qc.synth import synthetic_placenta_case
+    c = synthetic_placenta_case(quality="clean", seed=0)
+    files = {"cbf": _nii_bytes_affine(c.perfusion, (3.0, 3.0, 3.0)),
+             "placenta__placenta_mask": _nii_bytes_affine(c.placenta_mask, (3.0, 3.0, 3.0))}
+    facts = {"declared_units": "mL/100g/min", "labelling_scheme": "VSASL",
+             "gestational_age_wk": "30", "maternal_position": "lateral",
+             "field_strength_T": "3", "mask_source": "manual_on_m0",
+             "normalisation_mode": "scalar", "registration_model": "non-rigid (DSVR)",
+             "lambda": "0.9", "alpha": "0.767", "t1_blood_ms": "1650"}
+    data = _grade(_organ_body(files, facts, "placenta"))
+    ids = {c_["id"]: c_ for c_ in data["checks"]}
+    assert ids["p2.1.units_declaration"]["verdict"] == "PASS"
+    assert ids["p3.1.mask_integrity"]["verdict"] == "PASS"
+    assert "manual_on_m0" in ids["p3.1.mask_integrity"]["reason"]
+    assert data["verdict"] == "PASS"
+    assert data["coverage"]["complete"] is True
+
+
+def test_an_unknown_organ_posted_by_hand_falls_back_to_brain():
+    from osipy_qc.synth import synthetic_case
+    c = synthetic_case(quality="clean", seed=0)
+    body = (_part("cbf", "cbf.nii.gz", _nifti_bytes(c.cbf))
+            + _part("organ", data=b"spleen") + _part("population", data=b"adult")
+            + _part("files", "", b"") * 2 + b"--" + BOUNDARY.encode() + b"--\r\n")
+    data = _grade(body)
+    assert not [x for x in data["checks"] if x["id"].startswith(("k", "p"))]
+
+
+def test_the_page_offers_every_organs_thresholds_and_masks():
+    """The threshold editor showed only the brain's eight groups, so choosing
+    kidney left the reader editing numbers that grade nothing they selected."""
+    page = web._upload_page()
+    # one radio per organ (the string also appears in the JS selectors, so the
+    # radios are counted by their value rather than by the bare name)
+    for organ in ("brain", "kidney", "placenta"):
+        assert f'name="organ" value="{organ}"' in page, organ
+    for tok in ('data-thr="kidney_rbf_sanity_lo"', 'data-thr="placenta_ncc_pass"',
+                'name="kidney__cortex_left"', 'name="placenta__gestational_age_wk"',
+                'name="kidney__pld_or_ti_s"', "function applyOrgan"):
+        assert tok in page, tok

@@ -66,6 +66,12 @@ _CONSOLE_CSS = """
 .thr-g h4{margin:0 0 .45rem;font-size:.74rem;font-weight:600;letter-spacing:.06em;
   text-transform:uppercase;color:var(--accent-600)}
 
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem;margin:.7rem 0}
+.fact{display:flex;flex-direction:column;gap:.25rem}
+.fact>span{font-size:.8rem;font-weight:600}
+.fact small{font-size:.72rem;color:var(--muted);line-height:1.35}
+.fact input,.fact select{border:1px solid var(--line);border-radius:var(--radius-sm);padding:.45rem .6rem;font:inherit;font-size:.85rem;background:var(--surface);color:var(--ink)}
+.fact input:focus,.fact select:focus{outline:2px solid var(--accent);outline-offset:1px}
 .thr{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.7rem;margin:.7rem 0}
 .thr-f{display:flex;flex-direction:column;gap:.25rem}
 .thr-f span{font-size:.76rem;color:var(--muted)}
@@ -186,22 +192,32 @@ def _threshold_groups() -> tuple[str, str]:
     """
     import json as _json
 
-    from .batch import TUNABLE_GROUPS
+    from .batch import TUNABLE_GROUPS_BY_ORGAN
     from .core.config import for_population
 
-    defaults = {pop: {name: getattr(for_population(pop), name)
-                      for _g, fields in TUNABLE_GROUPS for name, _l in fields}
+    every = [(n, l) for groups in TUNABLE_GROUPS_BY_ORGAN.values()
+             for _g, fields in groups for n, l in fields]
+    defaults = {pop: {name: getattr(for_population(pop), name) for name, _l in every}
                 for pop in ("adult", "neonate")}
 
     out: list[str] = []
-    for group, fields in TUNABLE_GROUPS:
-        cells = "".join(
-            f'<label class="thr-f"><span>{esc(label)}</span>'
-            f'<input type="number" name="thr_{name}" step="any" inputmode="decimal" '
-            f'data-thr="{name}" placeholder="{defaults["adult"][name]:g}"></label>'
-            for name, label in fields
-        )
-        out.append(f'<div class="thr-g"><h4>{esc(group)}</h4><div class="thr">{cells}</div></div>')
+    for organ, groups in TUNABLE_GROUPS_BY_ORGAN.items():
+        blocks = []
+        for group, fields in groups:
+            cells = "".join(
+                f'<label class="thr-f"><span>{esc(label)}</span>'
+                f'<input type="number" name="thr_{name}" step="any" inputmode="decimal" '
+                f'data-thr="{name}" placeholder="{defaults["adult"][name]:g}"></label>'
+                for name, label in fields
+            )
+            blocks.append(f'<div class="thr-g"><h4>{esc(group)}</h4>'
+                          f'<div class="thr">{cells}</div></div>')
+        note = ("" if organ == "brain" else
+                f'<p class="thr-note"><b>Almost every {organ} threshold is UNCALIBRATED.</b> '
+                "They are engineering defaults awaiting calibration, not settled science, which "
+                "is exactly why they are editable here.</p>")
+        out.append(f'<div class="organ-only" data-organ="{organ}"{" hidden" if organ != "brain" else ""}>'
+                   f'{note}{"".join(blocks)}</div>')
     return "".join(out), _json.dumps(defaults)
 
 
@@ -275,6 +291,148 @@ _ORGAN_NOTE = {
 }
 
 
+# ---- organ-specific inputs --------------------------------------------------
+# The masks and acquisition facts each organ needs. These are not decoration:
+# without them a kidney upload reaches 4 of its 19 checks, and a placenta map
+# cannot be graded against any bound at all because P2.1 gates every magnitude
+# check on a declared unit. The kidney list follows R10.1 (left and right
+# reported separately); the placenta list follows P4.1/P4.2, where the labelling
+# scheme decides WHICH CIRCULATION was measured and gestational age is what makes
+# a perfusion value interpretable.
+_ORGAN_MASKS: dict[str, list[tuple[str, str, str]]] = {
+    "kidney": [
+        ("kidney_left", "Kidney &mdash; left", "whole-kidney mask"),
+        ("kidney_right", "Kidney &mdash; right", "whole-kidney mask"),
+        ("cortex_left", "Cortex &mdash; left", "the consensus ROI (R10.1)"),
+        ("cortex_right", "Cortex &mdash; right", "the consensus ROI (R10.1)"),
+        ("medulla_left", "Medulla &mdash; left", "optional; integrity flag only"),
+        ("medulla_right", "Medulla &mdash; right", "optional; integrity flag only"),
+    ],
+    "placenta": [
+        ("placenta_mask", "Placenta mask", "one mask, on the perfusion grid"),
+        ("anatomical_mask", "Anatomical placenta", "optional; for slab coverage"),
+    ],
+}
+
+#: (field, label, kind, options, hint). kind: "select" | "number" | "text".
+_ORGAN_FACTS: dict[str, list[tuple]] = {
+    "kidney": [
+        ("units", "Units of the map", "select",
+         ["", "mL/100g/min", "mL/min/100mL", "a.u."],
+         "required: the 50-500 bound is stated per 100 g"),
+        ("labelling", "Labelling scheme", "select", ["", "FAIR", "pCASL", "PASL", "ASL"],
+         "FAIR reads ~1.8x higher than pCASL in the same subjects"),
+        ("pld_or_ti_s", "PLD / TI (s)", "number", None,
+         "without it the PWS band cannot be applied"),
+        ("field_strength_t", "Field strength (T)", "number", None, "1.5 T reads ~11% higher"),
+        ("breathing_strategy", "Breathing", "select",
+         ["", "free breathing", "free breathing with gating", "breath-hold", "paced"],
+         "no BIDS field exists for this"),
+        ("readout", "Readout", "select", ["", "2D", "2D single-slice", "3D"],
+         "2D single-slice makes slice coverage N/A"),
+    ],
+    "placenta": [
+        ("declared_units", "Units of the map", "select",
+         ["", "mL/100g/min", "%M0", "a.u."],
+         "REQUIRED &mdash; every magnitude check is gated on this"),
+        ("labelling_scheme", "Labelling scheme", "select", ["", "VSASL", "pCASL", "FAIR", "PASL"],
+         "decides WHICH circulation was measured"),
+        ("gestational_age_wk", "Gestational age (wk)", "number", None,
+         "REQUIRED &mdash; perfusion changes across gestation"),
+        ("maternal_position", "Maternal position", "select", ["", "supine", "lateral", "prone"],
+         "lateral and supine differ materially"),
+        ("field_strength_T", "Field strength (T)", "number", None, "1.5 T / 3 T / 0.55 T"),
+        ("mask_source", "Mask drawn by", "select",
+         ["", "manual_on_m0", "manual_on_structural", "manual_on_perfusion", "automatic"],
+         "recorded, not judged &mdash; inter-rater Dice is ~0.68"),
+        ("normalisation_mode", "M0 normalisation", "select", ["", "scalar", "voxelwise"],
+         "voxel-wise imprints M0 structure on the map"),
+        ("registration_model", "Registration", "select",
+         ["", "none", "rigid", "non-rigid", "non-rigid (DSVR)"],
+         "the placenta deforms; rigid cannot correct it"),
+        ("lambda", "&lambda; (mL/g)", "number", None, "published placental range 0.9&ndash;1.0"),
+        ("alpha", "&alpha; (labelling eff.)", "number", None, "published range 0.6&ndash;0.767"),
+        ("t1_blood_ms", "T1 blood (ms)", "number", None, "~1650 at 3 T, ~1350 at 1.5 T"),
+    ],
+}
+
+
+def _organ_name_help() -> str:
+    """What filenames the organ loader recognises when a whole folder is dropped.
+
+    Generated from `organ_mask_vocabulary()` rather than written out here, for
+    the same reason the brain list is: a hand-copied second list drifts, and the
+    reader ends up told something the loader does not do.
+    """
+    from .io import organ_mask_vocabulary
+    vocab = organ_mask_vocabulary()
+    rows = "".join(
+        f'<b>{esc(role)} mask</b><code>{esc(", ".join(toks))}</code>'
+        for role, toks in vocab["structures"].items())
+    sides = "".join(
+        f'<b>{esc(side)}</b><code>{esc(", ".join(toks))}</code>'
+        for side, toks in vocab["sides"].items())
+    return (
+        '<details class="manual organ-only" data-organ="kidney" hidden>'
+        '<summary>Which mask filenames are recognised</summary>'
+        '<p class="thr-note">Only used when you drop a whole <b>folder</b>. The boxes above ignore '
+        'filenames entirely, and are the reliable route. A file naming BOTH cortex and medulla is '
+        'read as a combined label map (1 = cortex, 2 = medulla). A name carrying a modality token '
+        '(<code>rbf</code>, <code>perfusion</code>, <code>m0</code>) is read as an IMAGE, not a '
+        'mask, unless it also says <code>mask</code>/<code>label</code>/<code>seg</code>.</p>'
+        f'<div class="names">{rows}</div>'
+        '<p class="thr-note">Side is taken from the name, and the two kidneys are never merged:</p>'
+        f'<div class="names">{sides}</div></details>'
+        '<details class="manual organ-only" data-organ="placenta" hidden>'
+        '<summary>Which mask filenames are recognised</summary>'
+        '<p class="thr-note">Only used when you drop a whole <b>folder</b>; the box above ignores '
+        'filenames. A name containing <code>placenta</code> or <code>placental</code> is read as '
+        'the mask, unless it carries a modality token such as <code>perfusion</code>.</p></details>')
+
+
+def _organ_mask_boxes() -> str:
+    """Per-organ mask dropzones, hidden until that organ is chosen."""
+    out = []
+    for organ, boxes in _ORGAN_MASKS.items():
+        cells = "".join(_dropzone(f"{organ}__{field}", title, hint)
+                        for field, title, hint in boxes)
+        out.append(
+            f'<div class="organ-only" data-organ="{organ}" hidden>'
+            f'<div class="field-label">{organ.capitalize()} masks '
+            f'<span class="req">needed for most checks</span>'
+            f'<span class="opt">you supply these &mdash; the tool never invents a mask</span></div>'
+            f'<div class="grid2">{cells}</div></div>')
+    return "".join(out)
+
+
+def _organ_fact_fields() -> str:
+    """Per-organ acquisition facts, hidden until that organ is chosen."""
+    out = []
+    for organ, fields in _ORGAN_FACTS.items():
+        cells = []
+        for field, label, kind, options, hint in fields:
+            name = f"{organ}__{field}"
+            if kind == "select":
+                opts = "".join(
+                    f'<option value="{esc(o)}">{esc(o) if o else "&mdash; not stated &mdash;"}</option>'
+                    for o in (options or []))
+                ctl = f'<select name="{name}">{opts}</select>'
+            else:
+                step = ' step="any" inputmode="decimal"' if kind == "number" else ""
+                ctl = f'<input type="{kind}" name="{name}"{step}>'
+            cells.append(f'<label class="fact"><span>{label}</span>{ctl}'
+                         f'<small>{hint}</small></label>')
+        out.append(
+            f'<div class="organ-only" data-organ="{organ}" hidden>'
+            f'<div class="field-label">Acquisition facts '
+            f'<span class="opt">not in the NIfTI header &mdash; they must be told</span></div>'
+            f'<p class="thr-note">These are not optional extras. A perfusion number without its '
+            f'labelling scheme, units and context is not comparable to any other number, which is '
+            f'why several checks report UNKNOWN rather than grading without them.</p>'
+            f'<div class="facts">{"".join(cells)}</div></div>')
+    return "".join(out)
+
+
 def _upload_page(error: str = "") -> str:
     pops = [p for p in _POP_ORDER if p in POPULATIONS]
     from .core.registry import organs_covered
@@ -316,19 +474,38 @@ def _upload_page(error: str = "") -> str:
     many checks it could reach and which it could not.
   </div>
   <form id="qc" method="post" action="/run" enctype="multipart/form-data">
-    <div class="field-label">CBF map <span class="req">one of the two</span>
-      <span class="opt">QEI, noise, CBF level, coverage</span></div>
-    {_dropzone("cbf", "Choose or drop a CBF map", "quantified CBF (mL/100g/min), NIfTI")}
+    <div class="field-label">Organ <span class="req">choose first</span>
+      <span class="opt">it decides which files and which thresholds apply</span></div>
+    <div class="seg">{organ_seg}</div>
+    <p class="hint" data-organ-hint="brain"><b>Brain</b> is the v1.0 target and the only organ with
+       a validated quality index (QEI, cut-off 0.5).</p>
+    <p class="hint" data-organ-hint="kidney" hidden><b>Kidney.</b> The renal consensus states 59
+       rules and <b>no quality thresholds at all</b>, so every bound here is uncalibrated and
+       several checks can never FAIL. Report is <b>per kidney</b> and the graded ROI is the
+       <b>cortex</b> (R10.1). Masks come from you &mdash; there is no renal equivalent of
+       &ldquo;just run BET on it&rdquo;.</p>
+    <p class="hint" data-organ-hint="placenta" hidden><b>Placenta.</b> There is no placental
+       consensus document, and no public placental ASL dataset exists &mdash; this module is
+       validated against synthetic phantoms only. <b>Units and gestational age are required</b>:
+       without them the magnitude checks cannot be applied to a known quantity.</p>
 
-    <div class="field-label">Tissue maps
-      <span class="opt">optional &mdash; needed for QEI &amp; level checks</span></div>
-    <div class="grid2">
-      {_dropzone("gm", "Grey matter", "GM probability map")}
-      {_dropzone("wm", "White matter", "WM probability map")}
-      {_dropzone("csf", "CSF", "derived if omitted")}
-      <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
-        <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
+    <div class="field-label"><span data-map-label>CBF map</span> <span class="req">one of the two</span>
+      <span class="opt">QEI, noise, CBF level, coverage</span></div>
+    {_dropzone("cbf", "Choose or drop the perfusion map", "NIfTI, on one grid with its masks")}
+
+    <div class="organ-only" data-organ="brain">
+      <div class="field-label">Tissue maps
+        <span class="opt">optional &mdash; needed for QEI &amp; level checks</span></div>
+      <div class="grid2">
+        {_dropzone("gm", "Grey matter", "GM probability map")}
+        {_dropzone("wm", "White matter", "WM probability map")}
+        {_dropzone("csf", "CSF", "derived if omitted")}
+        <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
+          <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
+      </div>
     </div>
+    {_organ_mask_boxes()}
+    {_organ_fact_fields()}
 
     <div class="field-label">Raw acquisition <span class="req">one of the two</span>
       <span class="opt">schema, control/label, M0, motion, data type</span></div>
@@ -363,6 +540,7 @@ def _upload_page(error: str = "") -> str:
     </details>
 
     {name_help}
+    {_organ_name_help()}
 
     <details class="manual">
       <summary>Thresholds &mdash; change what counts as a pass</summary>
@@ -376,19 +554,12 @@ def _upload_page(error: str = "") -> str:
       </label>
     </details>
 
-    <div class="field-label">Organ <span class="opt">each organ has its own checks</span></div>
-    <div class="seg">{organ_seg}</div>
-    <p class="hint"><b>Brain</b> is the v1.0 target. <b>Kidney</b> and <b>placenta</b> are
-       implemented from their design documents but their thresholds are almost all
-       <b>uncalibrated</b> &mdash; there is no renal or placental equivalent of the QEI cut-off.
-       Both need <b>masks</b> you supply: kidney wants left and right separately, placenta wants
-       one placental mask. Without masks most of their checks report UNKNOWN rather than
-       guessing.</p>
-
-    <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
-    <div class="seg">{seg}</div>
-    <p class="hint">A neonate's normal GM CBF (~16) would look abnormal against the adult
-       40&ndash;100 band, so pick <b>neonate</b> for newborn scans.</p>
+    <div class="organ-only" data-organ="brain">
+      <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
+      <div class="seg">{seg}</div>
+      <p class="hint">A neonate's normal GM CBF (~16) would look abnormal against the adult
+         40&ndash;100 band, so pick <b>neonate</b> for newborn scans.</p>
+    </div>
 
     <div class="submit-row">
       <button type="submit" class="btn btn-primary">Grade scan &rarr;</button>
@@ -441,6 +612,38 @@ def _upload_page(error: str = "") -> str:
     r.addEventListener('change', applyPopulation);
   }});
   applyPopulation();
+
+  // The organ decides which files are asked for, which acquisition facts are
+  // required, and which thresholds are even applicable. Showing all three
+  // organs' controls at once would offer a kidney upload a GM/WM ratio it can
+  // never have, so everything organ-specific is toggled from one place.
+  function applyOrgan(){{
+    var el = document.querySelector('input[name="organ"]:checked');
+    var organ = el ? el.value : 'brain';
+    document.querySelectorAll('.organ-only').forEach(function(node){{
+      node.hidden = node.getAttribute('data-organ') !== organ;
+    }});
+    document.querySelectorAll('[data-organ-hint]').forEach(function(node){{
+      node.hidden = node.getAttribute('data-organ-hint') !== organ;
+    }});
+    // A perfusion map is called something different in each organ, and the
+    // label is what tells the reader which one to drop here.
+    var names = {{brain: 'CBF map', kidney: 'RBF map', placenta: 'Perfusion map'}};
+    document.querySelectorAll('[data-map-label]').forEach(function(node){{
+      node.textContent = names[organ] || 'Perfusion map';
+    }});
+    // Inputs inside a hidden section must not be submitted: a stale kidney mask
+    // left over from a previous selection would otherwise be graded as part of
+    // a placenta upload.
+    document.querySelectorAll('.organ-only').forEach(function(node){{
+      var off = node.hidden;
+      node.querySelectorAll('input, select').forEach(function(i){{ i.disabled = off; }});
+    }});
+  }}
+  document.querySelectorAll('input[name="organ"]').forEach(function(r){{
+    r.addEventListener('change', applyOrgan);
+  }});
+  applyOrgan();
 
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
@@ -631,6 +834,100 @@ def _checks_for(has_cbf: bool, has_raw: bool, organ: str = "brain") -> list[str]
     return cbf_map_checks(organ)
 
 
+def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
+    """Masks and acquisition facts posted by the organ-specific form sections.
+
+    Without this the console reached 4 of the kidney's 19 checks: the masks had
+    nowhere to arrive and the facts that gate the rest - units, labelling scheme,
+    PLD, gestational age - had no fields at all. They are separate from the raw
+    file drop because a mask is not recognisable by filename in general, and
+    because these facts are not in any NIfTI header.
+    """
+    import nibabel as nib
+    import numpy as np
+
+    out: dict = {}
+    prefix = f"{organ}__"
+
+    def _text(name):
+        v = fields.get(prefix + name)
+        if isinstance(v, tuple):
+            v = v[1]
+        if isinstance(v, bytes):
+            v = v.decode(errors="replace")
+        v = (v or "").strip()
+        return v or None
+
+    def _num(name):
+        raw = _text(name)
+        if raw is None:
+            return None
+        try:
+            val = float(raw)
+        except ValueError:
+            return None
+        return val if math.isfinite(val) else None
+
+    # ---- masks -------------------------------------------------------------
+    masks: dict[str, dict] = {}
+    for field, _title, _hint in _ORGAN_MASKS.get(organ, []):
+        part = fields.get(prefix + field)
+        if not (isinstance(part, tuple) and part[1]):
+            continue
+        fname, data = part
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
+        for ext in (".nii.gz", ".nii"):
+            if safe.lower().endswith(ext):
+                safe = safe[:-len(ext)] + ext
+                break
+        else:
+            safe += ".nii.gz"
+        mdir = os.path.join(tmp, "masks")
+        os.makedirs(mdir, exist_ok=True)
+        path = os.path.join(mdir, f"{field}_{safe}")
+        with open(path, "wb") as fh:
+            fh.write(data)
+        arr = np.asanyarray(nib.load(path).dataobj).astype(float) > 0.5
+        if organ == "kidney":
+            kind, _, side = field.rpartition("_")
+            masks.setdefault(f"{kind}_masks", {})[side] = arr
+        else:
+            out[field] = arr
+    out.update(masks)
+
+    # ---- acquisition facts -------------------------------------------------
+    for field, _label, kind, _opts, _hint in _ORGAN_FACTS.get(organ, []):
+        val = _num(field) if kind == "number" else _text(field)
+        if val is not None:
+            out[field] = val
+
+    # Facts several checks read under a different key, or as a context dict.
+    if organ == "kidney":
+        ctx = {k: out[k] for k in ("labelling", "field_strength_t", "readout") if k in out}
+        if ctx:
+            out["context"] = {**(existing.get("context") or {}), **ctx} \
+                if isinstance(existing.get("context"), dict) else ctx
+        if "units" in out:
+            out["rbf_supplied"] = existing.get("rbf_map") is not None or existing.get("cbf") is not None
+    else:
+        if "declared_units" in out:
+            # the caller declaring units IS the physiological claim P2.1 gates on
+            out["quantified"] = True
+        if "gestational_age_wk" in out:
+            out.setdefault("tr_s", None)
+        consts = {k: out.pop(k) for k in ("lambda", "alpha", "t1_blood_ms") if k in out}
+        if consts:
+            out["constants"] = consts
+        params = {}
+        scheme = str(out.get("labelling_scheme", "")).lower()
+        if "vsasl" in scheme:
+            params = {"cutoff_velocity_cm_s": _num("cutoff_velocity_cm_s"),
+                      "post_labeling_delay_s": _num("post_labeling_delay_s")}
+        if params:
+            out["scheme_params"] = {k: v for k, v in params.items() if v is not None}
+    return out
+
+
 def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
     """Write the uploaded NIfTIs to a temp dir, grade them, return the payload.
 
@@ -766,6 +1063,18 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             loaded = (load_organ_folder(raw_dir, organ) if organ != "brain"
                       else load_folder(raw_dir))
             inputs = {**loaded, **inputs}
+
+        if organ != "brain":
+            # The uploaded map arrives under the brain's key because the form
+            # field is shared. Each organ's checks read it under their own name,
+            # so it is aliased rather than renamed - a caller passing rbf_map
+            # directly must keep working.
+            alias = {"kidney": "rbf_map", "placenta": "perfusion_map"}[organ]
+            if inputs.get("cbf") is not None and alias not in inputs:
+                inputs[alias] = inputs["cbf"]
+            if organ == "placenta" and inputs.get("m0") is None and inputs.get("cbf") is not None:
+                pass          # an M0 is a separate upload; never derived from the map
+            inputs.update(_organ_inputs(organ, fields, tmp, inputs))
         report = run_qc(inputs, cfg=cfg,
                         checks=_checks_for(bool(paths["cbf"]), saved_raw, organ))
 
