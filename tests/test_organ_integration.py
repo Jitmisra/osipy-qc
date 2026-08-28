@@ -244,3 +244,84 @@ def test_the_favicon_data_uri_decodes_to_valid_svg():
     assert 'viewBox="0 0 40 40"' in svg
     assert "linearGradient" in svg          # the gradient def travels with it
     assert '"' not in uri                   # nothing that would close the attribute
+
+
+# --------------------------------------------------------------------------- #
+# defects the parallel probes found in the console
+# --------------------------------------------------------------------------- #
+def test_the_uploaded_map_wins_over_a_lookalike_in_the_raw_drop():
+    """The worst defect of the session. load_organ_folder set rbf_map from the
+    raw folder, and the alias guard was `if alias not in inputs`, so it never
+    fired - the console silently graded a DIFFERENT file from the one the user
+    put in the box, and reported a confident number about it."""
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    vox = (2.0, 2.0, 8.0)
+    decoy = np.full_like(c.rbf, 999.0)
+    body = (_part("cbf", "MY_MAP.nii.gz", _nii(c.rbf, vox))
+            + _part("files", "ASL_RBF.nii.gz", _nii(decoy, vox)))
+    for side in ("left", "right"):
+        body += _part(f"kidney__cortex_{side}", "c.nii.gz", _nii(c.cortex_masks[side], vox))
+    body += (_part("kidney__units", data=b"mL/100g/min")
+             + _part("organ", data=b"kidney") + _part("population", data=b"adult")
+             + _part("files", "", b""))
+    data = _grade(body)
+    reason = next(x["reason"] for x in data["checks"] if x["id"] == "k3.1.cortical_rbf")
+    assert "300" in reason and "999" not in reason, reason
+
+
+def test_strict_can_be_turned_off_for_every_organ():
+    """The marker for 'this form carried the control' was thr_qei_pass, a
+    brain-only threshold, so unchecking Strict was silently ignored for kidney
+    and placenta - the two organs where it matters most, since almost all their
+    thresholds are uncalibrated."""
+    g = synthetic_kidney_case(quality="garbage", seed=0)
+    vox = (2.0, 2.0, 8.0)
+    base = _part("cbf", "r.nii.gz", _nii(g.rbf, vox))
+    for side in ("left", "right"):
+        base += _part(f"kidney__cortex_{side}", "c.nii.gz", _nii(g.cortex_masks[side], vox))
+    base += (_part("kidney__units", data=b"mL/100g/min")
+             + _part("organ", data=b"kidney") + _part("population", data=b"adult")
+             + _part("files", "", b"") * 2)
+    assert _grade(base + _part("strict", data=b"1"))["verdict"] == "FAIL"
+    assert _grade(base)["verdict"] == "WARN"      # unchecked = not submitted
+
+
+def test_a_map_in_arbitrary_units_is_not_graded_against_a_per_mass_band():
+    """Accepting any non-empty string meant a caller who correctly declared
+    'a.u.' got a confident verdict from a band stated per 100 g."""
+    from osipy_qc.checks.kidney import _units_declared
+    assert _units_declared("mL/100g/min") and _units_declared("mL/min/100mL")
+    assert not _units_declared("a.u.") and not _units_declared("banana")
+    assert not _units_declared("") and not _units_declared(None)
+
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    from osipy_qc.checks.kidney import cortical_rbf_check
+    r = cortical_rbf_check(rbf_map=c.rbf, cortex_masks=c.cortex_masks, units="a.u.")
+    assert r.verdict.value == "UNKNOWN"
+    # and it must say what actually happened, not "not declared"
+    assert "declared as 'a.u.'" in r.reason
+
+
+def test_declaring_arbitrary_units_is_not_a_physiological_claim():
+    """`quantified` was set from the mere presence of a units string, so a map
+    declared as arbitrary units was treated as a physiological claim - the
+    opposite of what the caller said."""
+    c = synthetic_placenta_case(quality="clean", seed=0)
+    body = (_part("cbf", "p.nii.gz", _nii(c.perfusion))
+            + _part("placenta__placenta_mask", "m.nii.gz", _nii(c.placenta_mask))
+            + _part("placenta__declared_units", data="a.u.".encode())
+            + _part("organ", data=b"placenta") + _part("population", data=b"adult")
+            + _part("files", "", b"") * 2)
+    data = _grade(body)
+    units = next(x for x in data["checks"] if x["id"] == "p2.1.units_declaration")
+    assert units["verdict"] == "PASS"            # declaring a.u. is legitimate
+    assert units["metric"]["quantified"] is False
+
+
+def test_organ_folder_loading_works_from_the_cli():
+    """`--organ kidney <folder>` raised NameError: the import named only
+    load_folder while the branch called load_organ_folder."""
+    from osipy_qc.io import load_folder, load_organ_folder   # noqa: F401
+    import osipy_qc.cli as cli
+    src = open(cli.__file__).read()
+    assert "from .io import load_folder, load_organ_folder" in src

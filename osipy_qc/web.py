@@ -888,7 +888,11 @@ def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
         path = os.path.join(mdir, f"{field}_{safe}")
         with open(path, "wb") as fh:
             fh.write(data)
-        arr = np.asanyarray(nib.load(path).dataobj).astype(float) > 0.5
+        # via io._load, which refuses an absurd DECLARED shape before touching
+        # the data - a small gzip can expand to gigabytes, and a mask upload is
+        # no less able to do that than an image upload
+        from .io import _load
+        arr = _load(path) > 0.5
         if organ == "kidney":
             kind, _, side = field.rpartition("_")
             masks.setdefault(f"{kind}_masks", {})[side] = arr
@@ -912,8 +916,12 @@ def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
             out["rbf_supplied"] = existing.get("rbf_map") is not None or existing.get("cbf") is not None
     else:
         if "declared_units" in out:
-            # the caller declaring units IS the physiological claim P2.1 gates on
-            out["quantified"] = True
+            # Only a PHYSIOLOGICAL unit is a physiological claim. Declaring a map
+            # to be in arbitrary units or %-of-M0 is the opposite: it says the
+            # numbers are not perfusion in mL/100g/min, so treating it as
+            # `quantified` would apply bounds the caller explicitly disclaimed.
+            from .checks.placenta import _unit_family
+            out["quantified"] = _unit_family(out["declared_units"]) == "per_mass"
         if "gestational_age_wk" in out:
             out.setdefault("tr_s", None)
         consts = {k: out.pop(k) for k in ("lambda", "alpha", "t1_blood_ms") if k in out}
@@ -969,10 +977,13 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         if not math.isfinite(val):
             continue
         setattr(cfg, name, val)
-    if "strict" in fields or "thr_qei_pass" in fields:
-        # only a form that actually carries the control may change it; an upload
-        # that says nothing about strictness keeps the packaged default rather
-        # than silently grading leniently
+    # An unchecked checkbox is not submitted at all, so "strict absent" has to be
+    # told apart from "this request never carried the control". The marker must
+    # be a field EVERY organ's form posts: the previous marker was thr_qei_pass,
+    # a brain-only threshold, so unchecking Strict was silently ignored for
+    # kidney and placenta - the two organs where it matters most, since almost
+    # all their thresholds are uncalibrated.
+    if "strict" in fields or "organ" in fields or "thr_qei_pass" in fields:
         cfg.strict = bool(fields.get("strict", ("", b""))[1])
 
     with tempfile.TemporaryDirectory(prefix="osipy_qc_") as tmp:
@@ -1071,7 +1082,14 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             # so it is aliased rather than renamed - a caller passing rbf_map
             # directly must keep working.
             alias = {"kidney": "rbf_map", "placenta": "perfusion_map"}[organ]
-            if inputs.get("cbf") is not None and alias not in inputs:
+            # The explicitly-uploaded map ALWAYS wins over anything the raw
+            # folder guessed from a filename. Guarding this on `alias not in
+            # inputs` had it exactly backwards: load_organ_folder had already
+            # set rbf_map from the raw drop, so the guard never fired and the
+            # console silently graded a different file from the one the user
+            # put in the box - reporting a confident number about an image they
+            # did not choose.
+            if inputs.get("cbf") is not None:
                 inputs[alias] = inputs["cbf"]
             if organ == "placenta" and inputs.get("m0") is None and inputs.get("cbf") is not None:
                 pass          # an M0 is a separate upload; never derived from the map

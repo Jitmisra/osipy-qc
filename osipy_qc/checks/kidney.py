@@ -82,15 +82,46 @@ def _bs_state(value) -> bool | None:
     return None
 
 
+#: Unit spellings that mean "perfusion per unit mass or volume", which is what
+#: the renal bands are stated in. Anything else - arbitrary units, %-of-M0, or a
+#: string nobody recognises - is NOT a declaration this module can grade against.
+_RENAL_UNITS = ("ml/100g/min", "ml/min/100g", "ml/100 g/min", "ml/min/100 g",
+                "ml/min/100ml", "ml/min/100 ml", "ml/100ml/min", "ml/100 ml/min")
+
+
+def _units_reason(units) -> str:
+    """Why a map's units are not gradeable - stated precisely.
+
+    "not declared" and "declared, but in a unit these bands do not describe" are
+    different situations with different fixes, and telling a caller who
+    correctly wrote 'a.u.' that they declared nothing is simply wrong.
+    """
+    if not isinstance(units, str) or not units.strip():
+        return ("units not declared - the 50-500 bound and the 500 ceiling are stated per "
+                "100 g and cannot be applied to an unknown quantity")
+    return (f"units declared as '{units.strip()}', which is not a per-mass or per-volume "
+            "perfusion unit - the renal bands are stated per 100 g, so they do not describe "
+            "this map")
+
+
 def _units_declared(units) -> bool:
-    """Whether the caller stated what the map's numbers mean.
+    """Whether the caller stated what the map's numbers mean, IN A UNIT THE
+    BANDS APPLY TO.
 
     Undeclared units are not a formatting nicety: the 50-500 sanity band and the
     500 ceiling are both stated per 100 g, and a map in mL/min/100 mL differs by
     the ~1.05 g/mL tissue density before anything else. Grading an undeclared
     map would be grading an unknown quantity.
+
+    Accepting ANY non-empty string had the same effect by a different route: a
+    map declared "a.u." - or "banana" - was graded against a per-100-g band, so
+    a caller who correctly said their map was in arbitrary units got a confident
+    verdict about a quantity the band does not describe.
     """
-    return isinstance(units, str) and units.strip() != ""
+    if not isinstance(units, str) or not units.strip():
+        return False
+    return units.strip().lower().replace(" ", "") in tuple(
+        u.replace(" ", "") for u in _RENAL_UNITS)
 
 
 def _fmt_sides(values: dict, fmt: str = "{:.0f}") -> str:
@@ -387,8 +418,7 @@ def renal_implausible_check(rbf_map=None, kidney_masks=None, cortex_masks=None,
         return CheckResult("k2.3.implausible_values", Verdict.UNKNOWN, reason="needs an RBF map")
     if not _units_declared(units):
         return CheckResult("k2.3.implausible_values", Verdict.UNKNOWN,
-                           reason="units not declared - the ceiling is stated per 100 g and "
-                                  "cannot be applied to an unknown quantity")
+                           reason=_units_reason(units))
     rbf = np.asarray(rbf_map, dtype=float)
     rois = as_sides(cortex_masks) or as_sides(kidney_masks)
     roi_kind = "cortex" if as_sides(cortex_masks) else "whole_kidney"
@@ -477,8 +507,7 @@ def cortical_rbf_check(rbf_map=None, cortex_masks=None, kidney_masks=None,
         return CheckResult("k3.1.cortical_rbf", Verdict.UNKNOWN, reason="needs an RBF map")
     if not _units_declared(units):
         return CheckResult("k3.1.cortical_rbf", Verdict.UNKNOWN,
-                           reason="units not declared - a 50-500 bound stated per 100 g cannot "
-                                  "be applied to an unknown quantity")
+                           reason=_units_reason(units))
     rbf = np.asarray(rbf_map, dtype=float)
     cortex, whole = as_sides(cortex_masks), as_sides(kidney_masks)
     if not cortex and not whole:

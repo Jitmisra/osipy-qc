@@ -191,7 +191,7 @@ def main(argv=None) -> int:
                   "brain": c.brain, "voxel_mm": c.voxel_mm}
         report = run_qc(inputs, cfg=cfg)
     elif args.folder:
-        from .io import load_folder
+        from .io import load_folder, load_organ_folder
         # the organ-aware loader routes masks; the brain loader has no concept
         # of them, so `--organ kidney <folder>` used to silently drop every mask
         # and report UNKNOWN for the checks that needed them
