@@ -615,6 +615,24 @@ def left_right_consistency_check(rbf_map=None, cortex_masks=None, kidney_masks=N
         return CheckResult("k3.3.left_right", Verdict.UNKNOWN, reason="needs an RBF map")
     rois = as_sides(cortex_masks) or as_sides(kidney_masks)
     roi_kind = "cortex" if as_sides(cortex_masks) else "whole_kidney"
+    if roi_kind == "whole_kidney" and len(rois) >= 2:
+        # The consensus quantity is CORTICAL (R10.1). A whole-kidney asymmetry is
+        # still worth seeing - it is scale-free and catches one-sided problems -
+        # but it is a different quantity, so it is reported as INFO rather than
+        # graded against the cortical tolerance.
+        rbf_wk = np.asarray(rbf_map, dtype=float)
+        bad_wk = _grid_error(rbf_wk, kidney_masks)
+        if bad_wk:
+            return CheckResult("k3.3.left_right", Verdict.UNKNOWN, reason=bad_wk)
+        means_wk = {s: roi_stats(rbf_wk, m)["mean"] for s, m in rois.items()}
+        vals = list(means_wk.values())
+        ai_wk = asymmetry_index(vals[0], vals[1]) if len(vals) == 2 else float("nan")
+        return CheckResult(
+            "k3.3.left_right", Verdict.INFO,
+            metric={"per_kidney": means_wk, "roi": roi_kind, "asymmetry_pct": ai_wk,
+                    "graded": False, "tolerance": cfg.kidney_asymmetry_tol},
+            reason=f"whole-kidney asymmetry {ai_wk:.1f}% - reported, not graded (the "
+                   "consensus quantity is cortical; supply cortex masks to grade it)")
     if len(rois) < 2:
         return CheckResult("k3.3.left_right", Verdict.NA,
                            metric={"n_kidneys": len(rois)},
@@ -731,59 +749,122 @@ def kidney_mask_integrity_check(kidney_masks=None, cortex_masks=None, medulla_ma
 
 
 @register_qc_check("k4.2.registration", stream="B", required=True, organ=ORGAN)
-def kidney_registration_check(rbf_map=None, m0=None, delta_m=None, kidney_masks=None,
-                              m0_kidney_masks=None, cfg: QCConfig = QCConfig(), **_) -> CheckResult:
-    """Are the perfusion image, M0 and the masks on one grid, and do the kidneys
-    actually sit on top of each other?
+def kidney_registration_check(rbf_map=None, m0=None, delta_m=None, delta_m_4d=None,
+                              kidney_masks=None, affine=None, m0_affine=None,
+                              transforms=None, registration_scope=None,
+                              voxel_mm=None, cfg: QCConfig = QCConfig(), **_) -> CheckResult:
+    """Are the perfusion image and M0 on one geometry, was each kidney registered
+    separately, and how much residual misalignment is left?
 
-    Grid identity is checked first and is definitional — two arrays of different
-    shapes cannot be compared voxelwise at all. Alignment is then measured with
-    Dice between the kidney mask drawn on the ASL and the one drawn on the M0,
-    when both are supplied.
+    Three tests, and only the first can FAIL:
+
+    1. **Geometry.** Matching matrix sizes are necessary but not sufficient - two
+       images can both be 96x96x5 on different voxel sizes - so the AFFINES are
+       compared too, over the 3x4 geometry block with a 0.01 mm tolerance for
+       float round-trip. A mismatch with no transform supplied is a corruption
+       rather than an absence: every ROI statistic would be computed over the
+       wrong voxels. That is the only FAIL here.
+    2. **Scope.** A single global rigid transform for both kidneys cannot be
+       right, because the two kidneys move independently with respiration. WARN.
+    3. **Residual.** The intensity-weighted centroid of each kidney in the first
+       and last volume, reported in mm. Cheap and dependency-free; K7.1 grades
+       displacement properly, this only flags a residual above one in-plane voxel.
+
+    Deliberately NOT Dice. An earlier version FAILed on a Dice below an
+    uncalibrated cut-off, which is exactly the thing this project forbids: an
+    engineering default driving a hard failure.
     """
     moving = rbf_map if rbf_map is not None else delta_m
-    if moving is None or m0 is None:
+    metric: dict = {"registration_scope": registration_scope or "not recorded"}
+    if moving is None and m0 is None and delta_m_4d is None:
         return CheckResult("k4.2.registration", Verdict.UNKNOWN,
-                           reason="needs a perfusion image and an M0 to compare")
-    a = np.asarray(moving, dtype=float)
-    b = np.asarray(m0, dtype=float)
-    grids_match = a.shape == b.shape
-    metric: dict = {"perfusion_shape": tuple(a.shape), "m0_shape": tuple(b.shape),
-                    "grids_match": grids_match}
-    if not grids_match:
-        return CheckResult("k4.2.registration", Verdict.FAIL, metric=metric,
-                           reason=f"perfusion {a.shape} and M0 {b.shape} are on different grids - "
-                                  "resample before any ratio is formed (K2.2 is gated on this)")
+                           reason="needs a perfusion image, an M0, or a 4D series")
 
-    asl_masks, m0_masks = as_sides(kidney_masks), as_sides(m0_kidney_masks)
-    if not (asl_masks and m0_masks):
-        return CheckResult("k4.2.registration", Verdict.INFO, metric=metric,
-                           reason="perfusion and M0 share one grid; no second mask supplied, so "
-                                  "alignment itself was not measured")
+    # ---- 1. geometry -------------------------------------------------------
+    shapes_match = affines_match = None
+    if moving is not None and m0 is not None:
+        a, b = np.asarray(moving), np.asarray(m0)
+        shapes_match = a.shape[:3] == b.shape[:3]
+        metric.update({"perfusion_shape": tuple(a.shape[:3]), "m0_shape": tuple(b.shape[:3]),
+                       "shapes_match": shapes_match})
+    if affine is not None and m0_affine is not None:
+        diff = float(np.abs(np.asarray(affine, dtype=float)[:3, :4]
+                            - np.asarray(m0_affine, dtype=float)[:3, :4]).max())
+        affines_match = diff <= 0.01           # tolerance for float round-trip
+        metric.update({"affine_max_diff_mm": diff, "affines_match": affines_match})
 
-    from ..utils.mathops import dice
-    per_side = {}
-    for side in _sides_present(kidney_masks, m0_kidney_masks):
-        if side in asl_masks and side in m0_masks:
-            per_side[side] = float(dice(as_mask(asl_masks[side]), as_mask(m0_masks[side])))
-    metric["dice_per_kidney"] = per_side
-    metric["dice_pass"] = cfg.dice_pass
-    metric["dice_warn"] = cfg.dice_warn
-    if not per_side:
-        return CheckResult("k4.2.registration", Verdict.INFO, metric=metric,
-                           reason="perfusion and M0 share one grid; no matching pair of masks "
-                                  "to measure alignment with")
-    shown = _fmt_sides(per_side, "{:.2f}")
-    lowest = min(per_side.values())
-    if lowest < cfg.dice_warn:
-        return CheckResult("k4.2.registration", Verdict.FAIL, metric=metric, provisional=True,
-                           reason=f"ASL-to-M0 Dice {shown} - below {cfg.dice_warn}, the kidneys "
-                                  "do not overlap between the two images")
-    if lowest < cfg.dice_pass:
+    geometry_ok = (shapes_match is not False) and (affines_match is not False)
+    if not geometry_ok:
+        if transforms is not None:
+            metric["transform_supplied"] = True
+        else:
+            why = []
+            if shapes_match is False:
+                why.append(f"shapes {metric['perfusion_shape']} vs {metric['m0_shape']}")
+            if affines_match is False:
+                why.append(f"affines differ by {metric['affine_max_diff_mm']:.3f} mm")
+            return CheckResult("k4.2.registration", Verdict.FAIL, metric=metric,
+                               reason=f"perfusion and M0 are on different geometries "
+                                      f"({'; '.join(why)}) and no transform was supplied - "
+                                      "every ROI statistic would be over the wrong voxels")
+
+    # ---- 3. residual centroid shift, first volume against last -------------
+    residuals: dict = {}
+    masks = as_sides(kidney_masks)
+    arr = np.asarray(delta_m_4d, dtype=float) if delta_m_4d is not None else None
+    if arr is not None and arr.ndim == 4 and arr.shape[3] >= 2 and masks:
+        vox = tuple(float(v) for v in (voxel_mm or (1.0, 1.0, 1.0)))
+        in_plane = float(min(vox))
+        for side, mask in masks.items():
+            m = as_mask(mask)
+            if m.shape != arr.shape[:3]:
+                continue
+            idx = np.argwhere(m).astype(float)
+            cents = []
+            for t in (0, arr.shape[3] - 1):
+                w = arr[..., t][m]
+                good = np.isfinite(w)
+                if not good.any():
+                    cents = []
+                    break
+                ww = np.abs(w[good])
+                cents.append(idx[good].T @ ww / ww.sum() if ww.sum() > 0
+                             else idx[good].mean(axis=0))
+            if len(cents) == 2:
+                d_mm = (cents[1] - cents[0]) * np.asarray(vox)
+                residuals[side] = {"shift_mm": float(np.linalg.norm(d_mm)),
+                                   "shift_in_plane_voxels": float(np.linalg.norm(d_mm) / in_plane)}
+        if residuals:
+            metric["residual_first_to_last"] = residuals
+            metric["in_plane_mm"] = in_plane
+
+    # ---- 2. scope + verdict (worst of the tests that ran) -------------------
+    scope = (registration_scope or "").strip().lower()
+    problems = []
+    if scope == "global":
+        problems.append("a single global transform was used for both kidneys, which cannot be "
+                        "right - they move independently")
+    drifted = [s for s, v in residuals.items() if v["shift_in_plane_voxels"] > 1.0]
+    if drifted:
+        worst_shift = max(residuals[s]["shift_mm"] for s in drifted)
+        problems.append(f"residual centroid shift {worst_shift:.1f} mm on {', '.join(drifted)}, "
+                        "more than one in-plane voxel")
+    if problems:
         return CheckResult("k4.2.registration", Verdict.WARN, metric=metric, provisional=True,
-                           reason=f"ASL-to-M0 Dice {shown} - below {cfg.dice_pass}")
+                           reason="; ".join(problems))
+    if not scope and not residuals:
+        return CheckResult("k4.2.registration", Verdict.INFO, metric=metric,
+                           reason="geometry is consistent; no registration provenance recorded "
+                                  "and no 4D series to measure a residual with, so alignment "
+                                  "itself was not tested")
+    detail = []
+    if scope:
+        detail.append(f"scope {scope}")
+    if residuals:
+        detail.append("residual " + _fmt_sides({s: v["shift_mm"] for s, v in residuals.items()},
+                                               "{:.1f} mm"))
     return CheckResult("k4.2.registration", Verdict.PASS, metric=metric,
-                       reason=f"ASL-to-M0 Dice {shown} on one shared grid")
+                       reason="geometry consistent; " + ", ".join(detail))
 
 
 @register_qc_check("k4.3.slice_coverage", stream="B", required=True, organ=ORGAN)
@@ -841,8 +922,12 @@ def kidney_slice_coverage_check(rbf_map=None, kidney_masks=None, readout=None,
                            reason="no slice holds enough kidney mask to judge")
     if any(v["usable_slices"] == 0 for v in per_side.values()):
         empty = [s for s, v in per_side.items() if v["usable_slices"] == 0]
-        return CheckResult("k4.3.slice_coverage", Verdict.FAIL, metric=metric,
-                           reason=f"no usable slice at all on {', '.join(empty)}")
+        # UNKNOWN, not FAIL. With no usable slice there is no ROI statistic to
+        # grade, so the honest answer is "not measurable" - and the fraction's
+        # cut-points are uncalibrated, so they may not carry a FAIL either.
+        return CheckResult("k4.3.slice_coverage", Verdict.UNKNOWN, metric=metric,
+                           reason=f"no usable slice at all on {', '.join(empty)} - there is no "
+                                  "ROI statistic to grade")
     shown = _fmt_sides({s: 100 * v for s, v in fracs.items()}, "{:.0f}%")
     lowest = min(fracs.values())
     if lowest < cfg.kidney_slice_usable_warn:
@@ -1165,11 +1250,16 @@ def kidney_m0_tr_check(m0_tr_s=None, field_T=None, t1_map=None, cortex_masks=Non
     if m0_tr_s is None:
         return CheckResult("k6.3.m0_tr", Verdict.UNKNOWN, reason="no M0 TR recorded")
     tr = float(m0_tr_s)
-    # Literature T1 at 3 T / 1.5 T, in MILLISECONDS. The TR arrives in SECONDS,
-    # so every exponent below converts explicitly - mixing the two silently
-    # yields a correction factor of ~1.0 and hides the problem it exists to find.
-    t1_ms = ({"cortex": 1400.0, "medulla": 1650.0} if (field_T or 3) >= 2.5
-             else {"cortex": 1150.0, "medulla": 1350.0})
+    # Compartment T1 in MILLISECONDS, the midpoints of the published ranges in
+    # wolf2018 (renal T1/T2 systematic review): at 3 T cortex 1124-1406 -> 1265,
+    # medulla 1388-1685 -> 1537; at 1.5 T cortex 827-1080 -> 953, medulla
+    # 1054-1428 -> 1241. The TR arrives in SECONDS, so every exponent below
+    # converts explicitly - mixing the two silently yields a correction factor
+    # of ~1.0 and hides the very problem this check exists to find.
+    t1_ms = ({"cortex": 1265.0, "medulla": 1537.0} if (field_T or 3) >= 2.5
+             else {"cortex": 953.0, "medulla": 1241.0})
+    t1_source = ("wolf2018 range midpoint, "
+                 f"{'3T' if (field_T or 3) >= 2.5 else '1.5T'}")
     if t1_map is not None:
         for name, masks in (("cortex", as_sides(cortex_masks)),
                             ("medulla", as_sides(medulla_masks))):
@@ -1181,8 +1271,9 @@ def kidney_m0_tr_check(m0_tr_s=None, field_T=None, t1_map=None, cortex_masks=Non
     factors = {k: float(1.0 / (1.0 - np.exp(-(tr * 1000.0) / v))) for k, v in t1_ms.items()}
     spread = max(factors.values()) - min(factors.values())
     metric = {"tr_seconds": tr, "t1_ms_used": t1_ms, "correction_factors": factors,
-              "factor_spread": spread, "t1_source": "measured T1 map" if t1_map is not None
-              else f"literature values at {'3T' if (field_T or 3) >= 2.5 else '1.5T'}",
+              "factor_spread": spread,
+              "t1_source": "measured T1 map" if t1_map is not None else t1_source,
+              "applied": t1_map is not None,
               "min_tr_s": cfg.m0_tr_min_s}
     if tr >= cfg.m0_tr_min_s:
         return CheckResult("k6.3.m0_tr", Verdict.PASS, metric=metric,

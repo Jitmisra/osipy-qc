@@ -240,20 +240,28 @@ def test_p4_1_undeclared_scheme_is_a_definitional_fail():
 
 
 def test_p4_1_names_the_measured_compartment():
+    """From the ISMRM review's own table. FAIR belongs with VSASL, NOT with
+    pCASL: pCASL labels the maternal descending aorta to selectively label
+    maternal perfusion, while VSASL and FAIR are both contributed to by maternal
+    AND fetal flow. Grouping FAIR with pCASL told a reader the map described only
+    the maternal circulation when it did not."""
     vsasl = placenta_labelling_check(labelling_scheme="VSASL",
-                                     scheme_params={"cutoff_velocity_cm_s": 1.6})
+                                     scheme_params={"cutoff_velocity_cm_s": 1.6,
+                                                    "post_labeling_delay_s": 1.6})
     assert vsasl.verdict is Verdict.PASS
-    assert vsasl.metric["measured_compartment"] == "both maternal and fetal"
+    assert vsasl.metric["measured_compartment"] == "maternal_and_fetal"
+    fair = placenta_labelling_check(labelling_scheme="FAIR",
+                                    scheme_params={"inversion_slab_thickness_mm": 100})
+    assert fair.metric["measured_compartment"] == "maternal_and_fetal"
     pcasl = placenta_labelling_check(labelling_scheme="pCASL",
-                                     scheme_params={"labelling_duration_s": 1.8,
-                                                    "post_labeling_delay_s": 1.8})
-    assert pcasl.metric["measured_compartment"] == "maternal only"
+                                     scheme_params={"labelling_plane_position": "aortic bifurcation"})
+    assert pcasl.metric["measured_compartment"] == "maternal"
 
 
 def test_p4_1_missing_scheme_critical_params_warn():
     r = placenta_labelling_check(labelling_scheme="VSASL", scheme_params={})
     assert r.verdict is Verdict.WARN
-    assert r.metric["missing_params"] == ["cutoff_velocity_cm_s"]
+    assert r.metric["missing_params"] == ["cutoff_velocity_cm_s", "post_labeling_delay_s"]
 
 
 def test_p4_2_absent_gestational_age_is_a_definitional_fail():
@@ -399,19 +407,42 @@ def test_p6_3_does_not_grade_ncc_on_a_uniform_placenta():
     assert "too little" in r.reason
 
 
-def test_p6_4_surfaces_candidate_contractions_without_grading_them():
-    """The tool cannot distinguish a contraction from a large breath, so calling
-    one a defect would be a claim it cannot support."""
+def test_p6_4_occupancy_threshold_comes_from_outside_the_volume():
+    """The reference level must come from the SERIES, not from each volume's own
+    median. Using a volume's own median makes the statistic 0.5 for every volume
+    by the definition of a median - a number that cannot detect anything."""
     rng = np.random.default_rng(5)
-    vols = [rng.normal(10.0, 2.0, (8, 8, 2)) for _ in range(8)]
-    vols[4] = np.where(rng.random((8, 8, 2)) < 0.15, 30.0, 1.0)   # a squeezed volume
+    vols = [np.full((8, 8, 2), 10.0) + rng.normal(0, 0.2, (8, 8, 2)) for _ in range(8)]
+    vols[4] = np.full((8, 8, 2), 2.0) + rng.normal(0, 0.2, (8, 8, 2))   # signal collapses
     series = np.stack(vols, -1)
     r = placenta_contraction_check(asl_source_4d=series, placenta_mask=np.ones((8, 8, 2), bool),
                                    tr_s=6.0, cfg=CFG)
     assert r.verdict is Verdict.INFO             # always INFO
     assert r.metric["graded"] is False
-    assert 4 in r.metric["candidate_event_volumes"]
+    occ = r.metric["occupancy_per_volume"]
+    assert occ[4] < 0.1 and occ[0] > 0.6, occ    # NOT 0.5 everywhere
+    assert r.metric["candidate_event_volumes"] == [4]
     assert r.metric["candidate_event_times_s"][0] == pytest.approx(24.0)
+
+
+def test_p6_4_does_not_surface_noise_as_a_contraction():
+    """Occupancy is a proportion over a few hundred voxels, so its sampling error
+    alone crosses the 10% line every few volumes. A candidate must also be
+    outside the series' own robust variability, or a calm series reports phantom
+    events."""
+    mask = np.ones((8, 8, 2), bool)
+    for seed in range(6):
+        rng = np.random.default_rng(seed)
+        calm = np.stack([np.full((8, 8, 2), 10.0) + rng.normal(0, 0.2, (8, 8, 2))
+                         for _ in range(8)], -1)
+        r = placenta_contraction_check(asl_source_4d=calm, placenta_mask=mask, cfg=CFG)
+        assert r.metric["candidate_event_volumes"] == [], f"seed {seed}"
+
+        withev = [np.full((8, 8, 2), 10.0) + rng.normal(0, 0.2, (8, 8, 2)) for _ in range(8)]
+        withev[4] = np.full((8, 8, 2), 2.0) + rng.normal(0, 0.2, (8, 8, 2))
+        r2 = placenta_contraction_check(asl_source_4d=np.stack(withev, -1),
+                                        placenta_mask=mask, cfg=CFG)
+        assert r2.metric["candidate_event_volumes"] == [4], f"seed {seed}"
 
 
 # --------------------------------------------------------------------------- #
@@ -425,12 +456,12 @@ def _inputs(c):
                 quantified=True,
                 constants={"lambda": 0.9, "alpha": 0.767, "t1_blood_ms": 1650},
                 field_strength_T=3, labelling_scheme="VSASL",
-                scheme_params={"cutoff_velocity_cm_s": 1.6},
+                scheme_params={"cutoff_velocity_cm_s": 1.6, "post_labeling_delay_s": 1.6},
                 gestational_age_wk=30, maternal_position="lateral",
                 mask_source="manual, single rater", roi_definition="whole placenta",
                 m0_labelled=False, m0_background_suppressed=False,
                 asl_background_suppressed=True, normalisation_mode="scalar",
-                registration_model="non-rigid (DSVR)", tr_s=6.0,
+                registration_model="non-rigid (DSVR)", tr_s=6.0, m0_tr_s=8.0,
                 context={"cohort_comparable": True})
 
 

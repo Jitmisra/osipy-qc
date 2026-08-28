@@ -186,7 +186,7 @@ def grade_folder(folder: str, cfg: QCConfig | None = None,
     the whole registry."""
     cfg = cfg or QCConfig()
     if checks is None:
-        checks = cbf_map_checks()
+        checks = cbf_map_checks(getattr(cfg, "organ", "brain") if cfg else "brain")
     if not os.path.isdir(folder):
         raise NotADirectoryError(folder)
     subjects: list[Subject] = []

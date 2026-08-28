@@ -375,6 +375,20 @@ def classify_organ_file(filename: str) -> tuple[str | None, str | None]:
             break
 
     looks_like_mask = any(t in low for t in ("mask", "label", "seg", "roi", "_lbl"))
+    modality = None
+    if any(t in low for t in ("rbf", "perfusion", "cbf", "flow", "_pwi")):
+        modality = "perfusion"
+    elif any(t in low for t in ("m0", "calib")):
+        modality = "m0"
+    elif any(t in low for t in ("asl", "pcasl", "pasl", "fair", "vsasl", "deltam", "control",
+                                "label_", "tag")):
+        modality = "asl"
+    # An explicit mask token settles it; otherwise a MODALITY token wins over a
+    # structure token. Without this, placenta_perfusion.nii.gz was classified as
+    # a placenta MASK and cortex_m0.nii.gz as a cortex mask - an image graded as
+    # an ROI, which is the mirror of the failure the mask-first rule prevents.
+    if modality and not looks_like_mask:
+        return modality, side
     # A file naming BOTH structures is a combined label map, not a cortex mask.
     # renaldro ships exactly this: Label_Map_cortex_medulla.nii.gz with 0=background,
     # 1=cortex, 2=medulla. Classifying it as "cortex" would silently grade the
@@ -478,7 +492,11 @@ def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict
             perf = _load_first("perfusion", "left")
         if perf is not None:
             inputs["rbf_map"] = perf
-            inputs["units"] = "mL/100g/min"      # declared by the caller in the UI
+            # `units` is deliberately NOT set here. It is a DECLARATION the
+            # caller makes, and the checks that need it gate on its absence -
+            # inventing "mL/100g/min" would make every magnitude bound apply to
+            # a quantity nobody declared, which is the precise failure the units
+            # gate exists to prevent.
     else:
         arr = _load_first("placenta_mask")
         if arr is not None:

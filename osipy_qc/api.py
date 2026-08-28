@@ -74,6 +74,16 @@ def _streams() -> dict[str, str]:
     return {name: (entry.get("stream") or "?") for name, entry in all_checks().items()}
 
 
+def _organs() -> dict[str, list]:
+    """Which organ(s) each registered check grades.
+
+    The registry now holds three organs' checks, so a consumer listing them
+    without this cannot tell a renal check from a brain one - and 34 of the 54
+    would look like brain checks that mysteriously never run."""
+    return {name: list(entry.get("organs") or ("brain",))
+            for name, entry in all_checks().items()}
+
+
 def check_payload(res: dict, streams: dict[str, str] | None = None) -> dict:
     """One check result, labelled and grouped for display."""
     streams = streams if streams is not None else _streams()

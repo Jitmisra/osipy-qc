@@ -489,17 +489,17 @@ THRESHOLD_PROVENANCE: dict[str, tuple[Provenance, str, str]] = {
         'Nery F, et al. MAGMA 2020;33(1):141-161. doi:10.1007/s10334-019-00800-z (PARENCHIMA renal ASL consensus)',
         'The consensus default number of repetitions for a 2D renal readout; falling below it means the acquisition no longer matches what the consensus assumed.',
     ),
-    "placenta_implausible_ceiling": (
+    "placenta_upper_frac_warn": (
         Provenance.UNCALIBRATED,
         'NONE',
         'No placental perfusion ceiling is published. Reported placental values span 176 +/- 91 (Zun, VSASL) to 249-336 across gestation, in units that differ between studies, so the ceiling is a wide impossibility line and the units check (P2.1) gates it.',
     ),
-    "placenta_frac_warn": (
+    "placenta_neg_frac_warn": (
         Provenance.UNCALIBRATED,
         'NONE',
         'As for kidney: no published negative-fraction rule exists for any organ.',
     ),
-    "placenta_frac_fail": (
+    "placenta_nonfinite_fail": (
         Provenance.UNCALIBRATED,
         'NONE',
         'Number uncalibrated; the FAIL is licensed by the sign, not by the 20%.',
@@ -574,14 +574,27 @@ ORGANS: dict[str, dict] = {
         "note": "Default. All 17 checks apply.",
     },
     "kidney": {
-        # QEI needs a GM/WM template -> structurally inapplicable.
-        # Cortex/medulla contrast replaces the GM/WM ratio; not yet implemented.
+        # Kidney has its OWN 19 checks (k1.1-k7.3) registered under organ="kidney",
+        # so nothing is skipped from a shared set - the runner never shows it the
+        # brain's checks at all. skip_checks is kept for callers that still pass an
+        # explicit brain check list.
         "skip_checks": ("1.qei", "3.2.gm_wm_ratio", "3.4.deep_gm_ratio"),
         "note": (
-            "STUB. Renal ASL consensus: Nery F, et al. MAGMA 2020;33(1):141-161. "
-            "doi:10.1007/s10334-019-00800-z. Blocker: no consensus-endorsed automated "
-            "cortex/medulla segmentation exists, so the cortex/medulla ratio cannot yet "
-            "be computed unsupervised."
+            "Implemented from KIDNEY_QC_DESIGN.md. Renal ASL consensus: Nery F, et al. "
+            "MAGMA 2020;33(1):141-161. doi:10.1007/s10334-019-00800-z - 59 statements and "
+            "ZERO numeric quality thresholds, so almost every bound here is UNCALIBRATED. "
+            "Masks are required inputs: no consensus-endorsed automated cortex/medulla "
+            "segmentation exists, so the toolbox never derives one."
+        ),
+    },
+    "placenta": {
+        "skip_checks": ("1.qei", "3.2.gm_wm_ratio", "3.4.deep_gm_ratio"),
+        "note": (
+            "Implemented from PLACENTA_QC_DESIGN.md. There is no placental consensus "
+            "document at all - Taso 2023 covers the placenta with neither Recommendations "
+            "nor summarised practice - so every threshold is an engineering default. Units "
+            "are a gate (P2.1) and gestational age is mandatory context (P4.2). Validated "
+            "only against synthetic phantoms: no public placental ASL data exists."
         ),
     },
 }

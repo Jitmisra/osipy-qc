@@ -291,10 +291,44 @@ def test_k4_1_flags_an_organ_clipped_by_the_field_of_view():
     assert r.verdict is Verdict.WARN and "field of view" in r.reason
 
 
-def test_k4_2_grid_mismatch_is_a_fail_and_gates_k2_2():
+def test_k4_2_fails_only_on_a_geometry_mismatch_with_no_transform():
+    """The ONLY FAIL in this check. An earlier version also FAILed on a Dice
+    below an uncalibrated cut-off - an engineering default driving a hard
+    failure, which is exactly what this project forbids."""
     r = kidney_registration_check(rbf_map=np.ones((4, 4, 4)), m0=np.ones((8, 8, 8)), cfg=CFG)
     assert r.verdict is Verdict.FAIL
-    assert r.metric["grids_match"] is False
+    assert r.metric["shapes_match"] is False
+    # a transform rescues it
+    ok = kidney_registration_check(rbf_map=np.ones((4, 4, 4)), m0=np.ones((8, 8, 8)),
+                                   transforms=[object()], cfg=CFG)
+    assert ok.verdict is not Verdict.FAIL
+
+
+def test_k4_2_compares_affines_not_only_matrix_sizes():
+    """The doc's stated reason: two images can share 96x96x5 on DIFFERENT voxel
+    sizes, so a matrix-size test alone is necessary but not sufficient."""
+    same_shape = dict(rbf_map=np.ones((8, 8, 4)), m0=np.ones((8, 8, 4)), cfg=CFG)
+    r = kidney_registration_check(affine=np.diag([2., 2., 8., 1.]),
+                                  m0_affine=np.diag([2., 2., 4., 1.]), **same_shape)
+    assert r.verdict is Verdict.FAIL
+    assert r.metric["affine_max_diff_mm"] == pytest.approx(4.0)
+    # within the 0.01 mm float round-trip tolerance -> not a mismatch
+    close = kidney_registration_check(affine=np.diag([2., 2., 8., 1.]),
+                                      m0_affine=np.diag([2., 2., 8.005, 1.]), **same_shape)
+    assert close.verdict is not Verdict.FAIL
+    assert close.metric["affines_match"] is True
+
+
+def test_k4_2_flags_a_single_global_transform_for_both_kidneys():
+    """R8.1: the kidneys move independently, so one rigid transform cannot serve
+    both."""
+    A = np.diag([2., 2., 8., 1.])
+    common = dict(rbf_map=np.ones((8, 8, 4)), m0=np.ones((8, 8, 4)),
+                  affine=A, m0_affine=A, cfg=CFG)
+    assert kidney_registration_check(registration_scope="global", **common).verdict is Verdict.WARN
+    assert kidney_registration_check(registration_scope="per_kidney", **common).verdict is Verdict.PASS
+    # no provenance and nothing to measure -> INFO, not a silent PASS
+    assert kidney_registration_check(**common).verdict is Verdict.INFO
 
 
 def test_k4_3_counts_usable_slices(clean):
@@ -413,8 +447,18 @@ def test_k6_3_never_fails_and_reports_both_compartments():
     assert short.verdict is Verdict.WARN         # never FAIL - it is correctable
     f = short.metric["correction_factors"]
     assert f["cortex"] != f["medulla"] and short.metric["factor_spread"] > 0
+    # The T1 defaults are the wolf2018 published range midpoints, not invented:
+    # 3 T cortex 1124-1406 -> 1265 ms, medulla 1388-1685 -> 1537 ms.
+    assert short.metric["t1_ms_used"] == {"cortex": 1265.0, "medulla": 1537.0}
+    assert "wolf2018" in short.metric["t1_source"]
     # hand-check the physics: 1 / (1 - exp(-TR/T1)) with TR in s and T1 in ms
-    assert f["cortex"] == pytest.approx(1 / (1 - np.exp(-2000.0 / 1400.0)))
+    assert f["cortex"] == pytest.approx(1 / (1 - np.exp(-2000.0 / 1265.0)))
+
+    # and reproduce the design doc's own worked example: TR 3.0 s gives x1.103
+    # (cortex) to x1.165 (medulla) at 3 T
+    doc = kidney_m0_tr_check(m0_tr_s=3.0, field_T=3, cfg=CFG)
+    assert doc.metric["correction_factors"]["cortex"] == pytest.approx(1.103, abs=0.001)
+    assert doc.metric["correction_factors"]["medulla"] == pytest.approx(1.165, abs=0.002)
 
 
 # --------------------------------------------------------------------------- #

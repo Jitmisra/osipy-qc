@@ -436,12 +436,20 @@ def placenta_labelling_check(labelling_scheme=None, scheme_params=None, asl_4d=N
 
     scheme = str(labelling_scheme).strip().lower()
     params = scheme_params if isinstance(scheme_params, dict) else {}
+    # Scheme -> compartment, from the ISMRM review's own table. FAIR belongs with
+    # VSASL, NOT with pCASL: pCASL labels the maternal descending aorta "to
+    # selectively label maternal placental perfusion", while both VSASL and FAIR
+    # are contributed to by maternal AND fetal flow. Grouping FAIR with pCASL
+    # would tell a reader the map describes only the maternal circulation when it
+    # does not - the exact confusion this check exists to prevent.
     if "vsasl" in scheme or "velocity" in scheme:
-        critical, compartment = ("cutoff_velocity_cm_s",), "both maternal and fetal"
+        critical, compartment = ("cutoff_velocity_cm_s", "post_labeling_delay_s"), "maternal_and_fetal"
+    elif "fair" in scheme:
+        critical, compartment = ("inversion_slab_thickness_mm",), "maternal_and_fetal"
     elif "pcasl" in scheme or "casl" in scheme:
-        critical, compartment = ("labelling_duration_s", "post_labeling_delay_s"), "maternal only"
-    elif "pasl" in scheme or "fair" in scheme:
-        critical, compartment = ("inversion_time_s",), "maternal only"
+        critical, compartment = ("labelling_plane_position",), "maternal"
+    elif "pasl" in scheme:
+        critical, compartment = ("inversion_slab_thickness_mm",), "maternal_and_fetal"
     else:
         critical, compartment = (), "unknown"
     missing = [k for k in critical if params.get(k) in (None, "")]
@@ -508,7 +516,7 @@ def placenta_ga_context_check(gestational_age_wk=None, maternal_position=None,
 @register_qc_check("p5.1.m0_state", stream="A", required=True, organ=ORGAN)
 def placenta_m0_state_check(m0=None, m0_labelled=None, m0_background_suppressed=None,
                             asl_background_suppressed=None, quantified=None,
-                            perfusion_map=None, **_) -> CheckResult:
+                            perfusion_map=None, m0_tr_s=None, **_) -> CheckResult:
     """Is there an M0, is it unlabelled, and was it background-suppressed?
 
     The FAILs here are all definitional: claiming quantified perfusion with no
@@ -546,19 +554,34 @@ def placenta_m0_state_check(m0=None, m0_labelled=None, m0_background_suppressed=
     if m0_labelled:
         return CheckResult("p5.1.m0_state", Verdict.FAIL, metric=metric,
                            reason="the M0 carries labelling - it is not a calibration image")
-    if quantified and m0_background_suppressed:
-        return CheckResult("p5.1.m0_state", Verdict.FAIL, metric=metric,
-                           reason="the M0 was background-suppressed - the tissue signal it exists "
-                                  "to measure has been crushed, so perfusion is over-estimated")
+    if m0_background_suppressed:
+        if quantified:
+            return CheckResult("p5.1.m0_state", Verdict.FAIL, metric=metric,
+                               reason="the M0 was background-suppressed - the tissue signal it "
+                                      "exists to measure has been crushed, so perfusion is "
+                                      "over-estimated")
+        # Not a failure when no quantification is claimed: the M0 is then a
+        # reference image rather than a calibration denominator. But it is never
+        # a PASS, and the earlier version fell through to one whose reason said
+        # "not background-suppressed" about a background-suppressed M0.
+        return CheckResult("p5.1.m0_state", Verdict.WARN, metric=metric,
+                           reason="the M0 was background-suppressed - usable as a reference "
+                                  "image, but it cannot serve as a calibration denominator")
     if m0_labelled is None or m0_background_suppressed is None:
         return CheckResult("p5.1.m0_state", Verdict.UNKNOWN, metric=metric,
                            reason="the M0's labelling and background-suppression state are not "
                                   "recorded")
+    metric["m0_tr_s"] = m0_tr_s
+    soft = []
     if asl_background_suppressed is False:
+        soft.append("the ASL pairs were not background-suppressed - this may be deliberate; "
+                    "there is no published placental rule requiring it")
+    if m0_tr_s is None:
+        soft.append("the M0's repetition time is not recorded, so incomplete relaxation cannot "
+                    "be ruled out")
+    if soft:
         return CheckResult("p5.1.m0_state", Verdict.WARN, metric=metric,
-                           reason="M0 is clean, but the ASL pairs were not background-suppressed "
-                                  "- this may be deliberate; there is no published placental rule "
-                                  "requiring it")
+                           reason="M0 is clean, but " + "; ".join(soft))
     return CheckResult("p5.1.m0_state", Verdict.PASS, metric=metric,
                        reason="M0 present, unlabelled and not background-suppressed")
 
@@ -902,25 +925,50 @@ def placenta_contraction_check(asl_source_4d=None, delta_m_4d=None, placenta_mas
 
     m = as_mask(placenta_mask)
     # A contraction thickens and shrinks the placental cross-section, so the
-    # apparent occupied area drops. Proxy: the count of in-mask voxels whose
-    # signal stays above the volume's own median - a shape proxy that needs no
-    # per-volume re-segmentation.
+    # share of the mask still carrying placental signal drops.
+    #
+    # The reference level has to come from OUTSIDE the volume being measured,
+    # and it has to sit LOW. Two earlier versions were wrong in instructive ways:
+    # each volume's own median makes the statistic 0.5 for every volume by
+    # definition, and the series median puts every normal volume at ~0.5 too, so
+    # ordinary noise crosses the 10% line. A low percentile of the whole series
+    # instead puts a normal volume near 0.75 and a collapsed one near 0, which
+    # separates the event from the noise instead of competing with it.
+    all_vals = arr[m]
+    finite_all = all_vals[np.isfinite(all_vals)]
+    if finite_all.size == 0:
+        return CheckResult("p6.4.contraction_events", Verdict.UNKNOWN,
+                           reason="no finite placental signal in the series")
+    level = float(np.percentile(finite_all, 25))
     occupancy = []
     for t in range(arr.shape[3]):
         v = arr[..., t][m]
         v = v[np.isfinite(v)]
-        occupancy.append(float(np.count_nonzero(v > np.median(v)) / v.size) if v.size else np.nan)
+        occupancy.append(float(np.count_nonzero(v > level) / v.size) if v.size else np.nan)
     occ = np.asarray(occupancy, dtype=float)
     finite = occ[np.isfinite(occ)]
     if finite.size < cfg.placenta_min_volumes_contraction:
         return CheckResult("p6.4.contraction_events", Verdict.UNKNOWN,
                            reason="too few volumes with finite placental signal")
     baseline = float(np.median(finite))
+    # The design's rule is "a drop of more than 10% below baseline". On its own
+    # that surfaces noise: occupancy is a proportion over a few hundred mask
+    # voxels, so its sampling error alone crosses 10% every few volumes and a
+    # perfectly calm series reports phantom "events". A candidate must therefore
+    # ALSO be outside the series' own variability, measured robustly (MAD, scaled
+    # to a normal SD) so one real event cannot inflate the floor that is supposed
+    # to catch it. Both conditions, never either.
+    mad = float(np.median(np.abs(finite - baseline)))
+    noise_floor = 3.0 * 1.4826 * mad
     drops = [int(t) for t, v in enumerate(occ)
              if np.isfinite(v) and baseline > 0
-             and (baseline - v) / baseline > cfg.placenta_contraction_drop]
+             and (baseline - v) / baseline > cfg.placenta_contraction_drop
+             and (baseline - v) > noise_floor]
     metric = {"occupancy_per_volume": [round(float(v), 4) if np.isfinite(v) else None for v in occ],
-              "baseline_occupancy": baseline, "candidate_event_volumes": drops,
+              "occupancy_definition": "share of masked voxels above the 25th percentile of the "
+                                      "whole series inside the mask",
+              "reference_level": level, "baseline_occupancy": baseline,
+              "noise_floor": noise_floor, "candidate_event_volumes": drops,
               "n_candidate_events": len(drops),
               "drop_threshold": cfg.placenta_contraction_drop, "tr_s": tr_s,
               "prevalence_context": "contractions are reported in 60% or more of placental scans",

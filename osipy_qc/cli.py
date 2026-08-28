@@ -89,12 +89,12 @@ def _organ_demo_inputs(organ: str):
             quantified=True,
             constants={"lambda": 0.9, "alpha": 0.767, "t1_blood_ms": 1650},
             field_strength_T=3, labelling_scheme="VSASL",
-            scheme_params={"cutoff_velocity_cm_s": 1.6},
+            scheme_params={"cutoff_velocity_cm_s": 1.6, "post_labeling_delay_s": 1.6},
             gestational_age_wk=30, maternal_position="lateral",
             mask_source="manual, single rater", roi_definition="whole placenta",
             m0_labelled=False, m0_background_suppressed=False,
             asl_background_suppressed=True, normalisation_mode="scalar",
-            registration_model="non-rigid (DSVR)", tr_s=6.0,
+            registration_model="non-rigid (DSVR)", tr_s=6.0, m0_tr_s=8.0,
             context={"cohort_comparable": True},
         ), cfg
     from .synth import synthetic_case
@@ -172,10 +172,16 @@ def main(argv=None) -> int:
         return 2
 
     if args.organ_demo:
-        report = run_qc(*_organ_demo_inputs(args.organ_demo))
+        demo_inputs, demo_cfg = _organ_demo_inputs(args.organ_demo)
+        report = run_qc(demo_inputs, cfg=demo_cfg)
         _print_report(report)
         if args.json:
             print(report.to_json())
+        if args.html:
+            from .render import render_html
+            with open(args.html, "w") as fh:
+                fh.write(render_html(report, inputs=demo_inputs, cfg=demo_cfg))
+            print(f"\nwrote {args.html}")
         return 0
 
     if args.demo:
@@ -186,7 +192,11 @@ def main(argv=None) -> int:
         report = run_qc(inputs, cfg=cfg)
     elif args.folder:
         from .io import load_folder
-        inputs = load_folder(args.folder)
+        # the organ-aware loader routes masks; the brain loader has no concept
+        # of them, so `--organ kidney <folder>` used to silently drop every mask
+        # and report UNKNOWN for the checks that needed them
+        inputs = (load_organ_folder(args.folder, args.organ) if args.organ != "brain"
+                  else load_folder(args.folder))
         report = run_qc(inputs, cfg=cfg)
     else:
         ap.error("provide a folder, or use --demo")
