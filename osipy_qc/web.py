@@ -41,7 +41,7 @@ import tempfile
 import traceback
 import webbrowser
 
-from ._webassets import BASE_CSS, brand, esc
+from ._webassets import BASE_CSS, brand, esc, favicon_link
 from dataclasses import replace
 
 from .core.config import POPULATIONS, for_population
@@ -455,6 +455,7 @@ def _upload_page(error: str = "") -> str:
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>osipy-qc &mdash; ASL quality control</title>
+{favicon_link()}
 <style>{BASE_CSS}{_CONSOLE_CSS}</style></head><body>
 <div class="topbar">{brand("ASL quality control")}</div>
 
@@ -1129,7 +1130,7 @@ def _error_page(code: int, msg: str) -> str:
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{code}</title><style>{BASE_CSS}</style></head><body>"
+        f"<title>{code}</title>{favicon_link()}<style>{BASE_CSS}</style></head><body>"
         "<div style='max-width:560px;margin:14vh auto;padding:0 1.5rem;text-align:center'>"
         "<div style='display:inline-flex'>" + brand("ASL quality control") + "</div>"
         f"<h1 style='font-size:3rem;margin:1.4rem 0 .3rem'>{code}</h1>"

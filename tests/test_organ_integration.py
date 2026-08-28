@@ -209,3 +209,38 @@ def test_a_mask_on_the_wrong_grid_is_actionable_not_a_stack_trace():
     data = _grade(body)
     assert any("resample" in x["reason"] for x in data["checks"])
     assert not [x for x in data["checks"] if "check error" in x["reason"]]
+
+
+# --------------------------------------------------------------------------- #
+# branding
+# --------------------------------------------------------------------------- #
+def test_every_page_carries_the_favicon():
+    """Without it the browser tab shows a generic globe next to the title."""
+    from osipy_qc._webassets import favicon_link
+    from osipy_qc.report_html import render_html
+
+    link = favicon_link()
+    assert link.startswith('<link rel="icon" type="image/svg+xml"')
+    assert 'data:image/svg+xml,' in link
+
+    c = synthetic_case(quality="clean", seed=0)
+    report = run_qc(dict(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf,
+                         brain=c.brain, voxel_mm=c.voxel_mm))
+    for page in (web._upload_page(), web._upload_page("an error"),
+                 web._error_page(404, "nope"), render_html(report)):
+        assert '<link rel="icon"' in page
+
+
+def test_the_favicon_data_uri_decodes_to_valid_svg():
+    """A data URI with an unescaped '#' or quote silently yields a blank tab,
+    and nothing else in the page would look wrong."""
+    import re
+    from urllib.parse import unquote
+
+    from osipy_qc._webassets import favicon_link
+    uri = re.search(r'href="data:image/svg\+xml,([^"]+)"', favicon_link()).group(1)
+    svg = unquote(uri)
+    assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
+    assert 'viewBox="0 0 40 40"' in svg
+    assert "linearGradient" in svg          # the gradient def travels with it
+    assert '"' not in uri                   # nothing that would close the attribute

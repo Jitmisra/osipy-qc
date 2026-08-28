@@ -131,3 +131,32 @@ h1,h2,h3{margin:0;line-height:1.18;letter-spacing:-.02em}
 def esc(s) -> str:
     import html
     return html.escape(str(s))
+
+# The same OSIPI mark, as a browser-tab icon. Kept as an inline data URI rather
+# than a served file so the page stays a single self-contained string - the same
+# reason the CSS is inlined - and so the standalone HTML report written by
+# `--html` carries its own icon with no second request.
+#
+# Redrawn rather than reused: at 16 px the 3.4-wide stroke of the header mark
+# closes up into a blob, so the loop is stroked thicker on a filled rounded
+# square. The square also gives the icon a defined background, which a
+# transparent thin-stroke glyph does not have against a dark browser theme.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">'
+    '<defs><linearGradient id="g" x1="4" y1="8" x2="36" y2="32" '
+    'gradientUnits="userSpaceOnUse">'
+    '<stop stop-color="#F0479B"/><stop offset="1" stop-color="#7C3AED"/>'
+    '</linearGradient></defs>'
+    '<rect width="40" height="40" rx="9" fill="#FFFDFB"/>'
+    '<path d="M20 20c-3.4-4.6-6.4-7-9.6-7C6.3 13 4 16.1 4 20s2.3 7 6.4 7c3.2 0 '
+    '6.2-2.4 9.6-7 3.4-4.6 6.4-7 9.6-7C33.7 13 36 16.1 36 20s-2.3 7-6.4 7c-3.2 '
+    '0-6.2-2.4-9.6-7z" stroke="url(#g)" stroke-width="5" stroke-linecap="round" '
+    'fill="none"/></svg>'
+)
+
+
+def favicon_link() -> str:
+    """<link> tag carrying the OSIPI mark as an inline SVG data URI."""
+    from urllib.parse import quote
+    return ('<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,'
+            + quote(_FAVICON_SVG, safe="") + '">')

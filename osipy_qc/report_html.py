@@ -31,7 +31,7 @@ import math
 
 import numpy as np
 
-from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc
+from ._webassets import BASE_CSS, VERDICT_COLOURS, brand, esc, favicon_link
 from .core.config import QCConfig
 from .utils.imaging import (CBF_UNITS, colorbar_svg, format_level, histogram_svg,
                             mosaic_window, negative_colour, png_data_uri, slice_mosaic)
@@ -564,7 +564,8 @@ def render_html(report, inputs: dict | None = None, cfg: QCConfig | None = None,
     )
     return ("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-            f"<title>{esc(title)}</title><style>{BASE_CSS}{_REPORT_CSS}</style></head>"
+            f"<title>{esc(title)}</title>{favicon_link()}"
+            f"<style>{BASE_CSS}{_REPORT_CSS}</style></head>"
             f"<body>{body}</body></html>")
 
 
