@@ -88,14 +88,31 @@ _NEG = (60, 200, 230)
 CBF_UNITS = "mL/100 g/min"
 
 
+#: Where the colour ramp starts for the lowest MEASURED value. The ramp's own
+#: zero end is (0, 0, 4) - visually black - and voxels outside the organ are also
+#: black, so the lowest real tissue and "no data here" rendered identically. On a
+#: kidney that made the medulla, which is genuine tissue at a legitimately low
+#: perfusion, look like a hole punched through the organ. Starting at 0.15 gives
+#: the lowest measured value a visible dark violet (40, 12, 78) while leaving
+#: exact zeros black, so "nothing" and "the least of something" look different.
+_RAMP_FLOOR = 0.15
+
+
 def colorise(slice2d: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
-    """Map a 2-D slice to RGB. Negative voxels are painted cyan so the report
-    shows them rather than hiding them at the bottom of the ramp."""
+    """Map a 2-D slice to RGB.
+
+    Three cases are deliberately distinguishable: exact zero (outside the imaged
+    organ) stays black, negative voxels are painted cyan so the report shows them
+    rather than hiding them at the bottom of the ramp, and everything else runs
+    the ramp from `_RAMP_FLOOR` upward.
+    """
     a = np.asarray(slice2d, dtype=float)
     a = np.where(np.isfinite(a), a, 0.0)
     span = (vmax - vmin) or 1.0
     t = np.clip((a - vmin) / span, 0.0, 1.0)
+    t = _RAMP_FLOOR + (1.0 - _RAMP_FLOOR) * t
     rgb = _lerp(_HOT, t)
+    rgb[a == 0] = 0            # no data: black, and distinct from the ramp floor
     rgb[a < 0] = _NEG
     return rgb
 
@@ -119,8 +136,20 @@ def mosaic_window(volume: np.ndarray) -> tuple[float, float]:
 
 
 def ramp_stops() -> list[tuple[float, str]]:
-    """The perfusion colour ramp as (offset, #rrggbb), for drawing a colourbar."""
-    return [(t, "#%02x%02x%02x" % rgb) for t, rgb in _HOT]
+    """The perfusion colour ramp as (offset, #rrggbb), for drawing a colourbar.
+
+    Rendered through the SAME floor `colorise` applies, so the bar shows the
+    colours the image actually uses. Returning the raw ramp would draw a bar
+    whose left end is black while no voxel in the picture is ever that colour -
+    a legend that misstates its own image, which is the failure this function
+    exists to prevent.
+    """
+    # position along the BAR (0 = vmin, 1 = vmax), coloured by what colorise
+    # would paint a voxel at that value - i.e. through the same floor
+    pos = np.linspace(0.0, 1.0, 9)
+    rgb = _lerp(_HOT, (_RAMP_FLOOR + (1.0 - _RAMP_FLOOR) * pos).reshape(1, -1))[0]
+    return [(float(p), "#%02x%02x%02x" % tuple(int(c) for c in rgb[i]))
+            for i, p in enumerate(pos)]
 
 
 def negative_colour() -> str:
@@ -143,9 +172,33 @@ def format_level(v: float) -> str:
     return f"{v:.0f}" if abs(v) >= 10 else f"{v:.3g}"
 
 
+def slice_axis_of(shape, voxel_mm=None) -> int:
+    """Which array axis to slice along for a mosaic.
+
+    Prefers the thickest voxel dimension, which IS the slice-encoding direction
+    in any anisotropic acquisition. Falls back to the axis with the fewest
+    samples, which is the same axis in almost all real data and is what an
+    isotropic volume can support.
+
+    The mosaic used to hard-code axis 2. That is right for a brain stored the
+    usual way and wrong the moment it is not: on a two-kidney volume whose organs
+    are separated along axis 2, it sliced BETWEEN the kidneys - half the panels
+    came out empty and no panel ever showed both kidneys at once, which is the
+    one thing a per-kidney report needs to show.
+    """
+    dims = list(shape[:3])
+    if voxel_mm is not None and len(voxel_mm) >= 3:
+        vox = [float(v) for v in voxel_mm[:3]]
+        others = sorted(vox)
+        if others[-1] >= 1.5 * others[-2]:          # genuinely anisotropic
+            return int(np.argmax(vox))
+    return int(np.argmin(dims))
+
+
 def slice_mosaic(volume: np.ndarray, n: int = 12, cols: int = 6,
-                 vmin: float | None = None, vmax: float | None = None) -> np.ndarray:
-    """A grid of evenly-spaced axial slices through a 3-D volume -> RGB.
+                 vmin: float | None = None, vmax: float | None = None,
+                 slice_axis: int | None = None, voxel_mm=None) -> np.ndarray:
+    """A grid of evenly-spaced slices through a 3-D volume -> RGB.
 
     Windowed to the 2nd..98th percentile of the non-zero values by default, so a
     handful of extreme voxels cannot wash the whole image out.
@@ -165,9 +218,16 @@ def slice_mosaic(volume: np.ndarray, n: int = 12, cols: int = 6,
     if vmax <= vmin:
         vmax = vmin + 1.0
 
-    nz = vol.shape[2]
-    idx = np.linspace(0, nz - 1, min(n, nz)).round().astype(int)
-    tiles = [colorise(np.rot90(vol[:, :, k]), vmin, vmax) for k in idx]
+    axis = slice_axis_of(vol.shape, voxel_mm) if slice_axis is None else int(slice_axis)
+    nz = vol.shape[axis]
+    # Space the slices across the part of the volume that HAS data. Spanning the
+    # full extent spends panels on the empty margins above and below the organ -
+    # on the kidney phantom a third of the mosaic came out blank, which reads as
+    # missing data rather than as empty air.
+    occupied = [k for k in range(nz) if np.take(vol, k, axis=axis).any()]
+    lo, hi = (occupied[0], occupied[-1]) if occupied else (0, nz - 1)
+    idx = np.linspace(lo, hi, min(n, hi - lo + 1)).round().astype(int)
+    tiles = [colorise(np.rot90(np.take(vol, k, axis=axis)), vmin, vmax) for k in idx]
 
     th, tw, _ = tiles[0].shape
     rows = int(np.ceil(len(tiles) / cols))

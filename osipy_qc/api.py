@@ -149,7 +149,7 @@ def _kpis(by: dict[str, dict], cfg: QCConfig) -> list[dict]:
     return out
 
 
-def _figure_list(inputs: dict) -> list[dict]:
+def _figure_list(inputs: dict, cfg: QCConfig | None = None) -> list[dict]:
     """Which figures can be rendered for this subject, given its inputs.
 
     Image figures carry the intensity window they were rendered with. The window
@@ -166,15 +166,29 @@ def _figure_list(inputs: dict) -> list[dict]:
                "note": "windowed to this scan's 2nd-98th percentile, so colours "
                        "are not comparable between scans"}
     if cbf is not None:
-        figs.append({"name": "cbf", "kind": "png", "title": "CBF map", "window": win,
+        # The map is called something different in each organ, and the mosaic
+        # cannot know its orientation - it slices the thinnest/shortest axis,
+        # which is the slice-encoding direction in real data but is not
+        # necessarily "axial". Claiming an orientation we did not measure is the
+        # same class of error as calling array axis 2 the slice axis.
+        organ = (getattr(cfg, "organ", None) if cfg is not None else None) \
+            or inputs.get("organ") or "brain"
+        map_name = {"brain": "CBF map", "kidney": "RBF map",
+                    "placenta": "Perfusion map"}.get(organ, "Perfusion map")
+        quantity = {"brain": "CBF", "kidney": "RBF",
+                    "placenta": "perfusion"}.get(organ, "perfusion")
+        figs.append({"name": "cbf", "kind": "png", "title": map_name, "window": win,
                      # The colour is READ from the renderer, not named here. This
                      # caption used to say "Blue marks negative CBF" while the code
                      # paints negatives cyan - and the ramp's own low end IS a
                      # blue-dominant dark violet, so the sentence pointed reviewers
                      # at ordinary low-perfusion voxels and called them artefacts.
-                     "caption": f"Evenly spaced axial slices, dark = low, bright yellow = high. "
-                                f"Voxels below zero are painted cyan ({negative_colour()}): "
-                                "negative CBF is non-physical and indicates noise or a "
+                     "caption": f"Evenly spaced slices through the imaged volume, dark violet = "
+                                f"low, bright yellow = high. Three things look different on "
+                                f"purpose: black is outside the imaged organ (no data), the "
+                                f"ramp's dark violet is the LOWEST measured value, and cyan "
+                                f"({negative_colour()}) marks voxels below zero - negative "
+                                f"{quantity} is non-physical and indicates noise or a "
                                 "subtraction artefact."})
     if inputs.get("cbf") is not None and inputs.get("gm") is not None:
         figs.append({"name": "gm_hist", "kind": "svg", "title": "Grey-matter CBF distribution",
@@ -214,7 +228,7 @@ def subject_payload(subject: Subject) -> dict:
         "drivers": drivers,
         "kpis": _kpis(by, subject.cfg),
         "checks": checks,
-        "figures": _figure_list(subject.inputs),
+        "figures": _figure_list(subject.inputs, getattr(subject, "cfg", None)),
     }
 
 

@@ -425,3 +425,66 @@ def test_the_fields_that_gate_whole_checks_are_marked_on_the_form():
     so, so the first sign was an unexplained UNKNOWN in the report."""
     page = web._upload_page()
     assert page.count("gates checks") == 3      # kidney units, placenta units, GA
+
+
+# --------------------------------------------------------------------------- #
+# the figure
+# --------------------------------------------------------------------------- #
+def test_the_mosaic_slices_an_axis_it_chose_not_one_it_assumed():
+    """slice_mosaic hard-coded axis 2. On a two-kidney volume whose organs are
+    separated along that axis it sliced BETWEEN them: half the panels came out
+    empty and no panel ever showed both kidneys, which is the one thing a
+    per-kidney report has to show."""
+    from osipy_qc.utils.imaging import slice_axis_of
+    # brain-shaped and real renal data keep the conventional axis
+    assert slice_axis_of((36, 36, 28)) == 2
+    assert slice_axis_of((64, 32, 16)) == 2
+    assert slice_axis_of((64, 64, 36)) == 2
+    # the kidney phantom does not
+    assert slice_axis_of((32, 40, 40)) == 0
+    # a thick-slice acquisition is decided by the voxel size, not the shape
+    assert slice_axis_of((32, 40, 40), (2.0, 2.0, 8.0)) == 2
+
+
+def test_the_mosaic_shows_both_kidneys():
+    from osipy_qc.utils.imaging import slice_axis_of
+    from osipy_qc.utils.roi import component_sizes
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    axis = slice_axis_of(c.rbf.shape)
+    idx = np.linspace(0, c.rbf.shape[axis] - 1, 12).round().astype(int)
+    both = sum(1 for k in idx
+               if len(component_sizes((np.take(c.rbf, k, axis=axis) > 0)[..., None])) == 2)
+    assert both >= 6, f"only {both}/12 panels show both kidneys"
+
+
+def test_no_data_and_the_lowest_measured_value_look_different():
+    """The ramp's own floor is (0,0,4) - visually black - and voxels outside the
+    organ are black too, so genuine low-perfusion tissue rendered identically to
+    a hole. On a kidney that made the medulla look like a hole punched through
+    the organ."""
+    from osipy_qc.utils.imaging import colorise
+    vmin, vmax = 110.0, 313.0
+    bg = colorise(np.array([[0.0]]), vmin, vmax)[0, 0].astype(int)
+    low = colorise(np.array([[120.0]]), vmin, vmax)[0, 0].astype(int)
+    assert tuple(bg) == (0, 0, 0)                  # no data stays black
+    assert np.linalg.norm(bg - low) > 80           # was 27 - invisible
+
+
+def test_the_colour_bar_shows_the_colours_the_image_actually_uses():
+    """A legend that misstates its own image is worse than no legend."""
+    from osipy_qc.utils.imaging import colorise, ramp_stops
+    vmin, vmax = 110.0, 313.0
+    for pos, hexc in ramp_stops():
+        val = vmin + pos * (vmax - vmin)
+        rgb = colorise(np.array([[val]]), vmin, vmax)[0, 0]
+        assert hexc == "#%02x%02x%02x" % tuple(int(c) for c in rgb), pos
+
+
+def test_the_figure_is_named_for_its_organ():
+    from osipy_qc.api import _figure_list
+    for organ, title in (("brain", "CBF map"), ("kidney", "RBF map"),
+                         ("placenta", "Perfusion map")):
+        c = synthetic_kidney_case(quality="clean", seed=0)
+        figs = _figure_list({"cbf": c.rbf}, QCConfig(organ=organ))
+        assert figs[0]["title"] == title
+        assert "axial" not in figs[0]["caption"]   # an orientation we never measured
