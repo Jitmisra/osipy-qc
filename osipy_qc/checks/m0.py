@@ -20,8 +20,13 @@ from ..core.result import CheckResult, Verdict
 
 
 @register_qc_check("6.1.m0_present", stream="A", required=True)
-def m0_present_check(m0_type: str | None = None, **_) -> CheckResult:
+def m0_present_check(m0_type: str | None = None, detected: dict | None = None,
+                     **_) -> CheckResult:
     """PASS if an M0 reference exists; WARN if absent (calibration must derive one)."""
+    if isinstance(detected, dict) and detected.get("any_data") is False:
+        return CheckResult("6.1.m0_present", Verdict.UNKNOWN,
+                           reason="no imaging files were found - an absent M0 is a finding "
+                                  "about a dataset, and there is no dataset here")
     if m0_type is None:
         return CheckResult("6.1.m0_present", Verdict.UNKNOWN, reason="M0 type not determined")
     if m0_type in ("separate", "included"):

@@ -146,7 +146,7 @@ cfg = for_population("neonate")   # v1.0 ships "adult" (default) and "neonate"
 A newborn's normal GM CBF (~16) is far below the adult 40–100 band, so grading a
 neonate against adult bands would fail every scan. `for_population()` **raises**
 on an unknown name rather than silently defaulting. Other age groups are planned
-once their bands are calibrated with the mentors (see POPULATION_BANDS.md).
+once their bands are calibrated with the mentors (see the population table in [THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md)).
 
 ### Provenance — "how did you get this number?"
 ```python

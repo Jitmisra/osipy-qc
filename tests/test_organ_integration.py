@@ -612,3 +612,37 @@ def test_the_memory_guard_fits_inside_the_container_it_protects():
     # and still clears the largest real input by a wide margin (a 208x300x320
     # T1 is about 160 MB as float64)
     assert MAX_ARRAY_BYTES > 170 * 1024 * 1024
+
+
+def test_an_empty_folder_is_unknown_not_a_warning():
+    """An empty folder produced WARN on two checks: 5.1 said "no BIDS sidecar,
+    fields inferred from NIfTI + filenames" when there were no NIfTIs to infer
+    from, and 6.1 said "no M0" about a dataset that did not exist. Both invent a
+    finding out of nothing - the same class as the phantom-folder bug."""
+    import tempfile
+
+    from osipy_qc.io import load_folder
+    with tempfile.TemporaryDirectory() as d:
+        rep = run_qc(load_folder(d), cfg=QCConfig())
+    assert rep.overall.value == "UNKNOWN"
+    assert rep.coverage["graded"] == 0
+    assert not [r for r in rep.results if r.verdict.value in ("PASS", "WARN", "FAIL")]
+
+
+def test_a_folder_with_data_still_grades_normally():
+    """The empty-folder guard must not silence a real one."""
+    import tempfile
+
+    import nibabel as nib
+
+    from osipy_qc.io import load_folder
+    from osipy_qc.synth import synthetic_control_label
+    with tempfile.TemporaryDirectory() as d:
+        nib.save(nib.Nifti1Image(synthetic_control_label(n_pairs=4).astype(np.float32),
+                                 np.diag([3., 3., 3., 1.])),
+                 os.path.join(d, "PCASL.nii.gz"))
+        rep = run_qc(load_folder(d), cfg=QCConfig())
+    assert rep.coverage["graded"] > 0
+    ids = {r.check: r.verdict.value for r in rep.results}
+    assert ids["5.1.schema"] == "WARN"          # genuinely no sidecar
+    assert ids["6.1.m0_present"] == "WARN"      # genuinely no M0

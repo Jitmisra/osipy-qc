@@ -125,14 +125,19 @@ def detect_dataset(files: list[dict], context: str = "") -> dict:
         n_vol = asl["shape"][3]
         structure = f"control/label series ({n_vol} volumes)"
 
+    # "absent" is a finding about a dataset; with no files at all there is no
+    # dataset to make findings about. Saying "no M0" of an empty folder invents
+    # a defect out of nothing, which is the failure the phantom-folder bug was.
+    any_data = bool(files)
     return {
         "vendor": guess_vendor(context),
         "readout": guess_readout(context, slice_mm),
         "structure": structure,
         "n_volumes": n_vol,
-        "m0": "separate" if roles["m0"] else "absent",
+        "m0": ("separate" if roles["m0"] else "absent") if any_data else None,
         "background_suppression": guess_background_suppression(context),
         "t1_structural": bool(roles["t1"]),
+        "any_data": any_data,
     }
 
 
@@ -176,6 +181,10 @@ def schema_check(sidecar: dict | None = None, detected: dict | None = None, **_)
                                reason=f"sidecar present but missing {missing}")
         return CheckResult("5.1.schema", Verdict.PASS, reason="BIDS sidecar valid")
     # no sidecar
+    if detected and detected.get("any_data") is False:
+        return CheckResult("5.1.schema", Verdict.UNKNOWN, metric={"inferred": detected},
+                           reason="no imaging files were found - nothing to validate a schema "
+                                  "against")
     if detected:
         return CheckResult("5.1.schema", Verdict.WARN, metric={"inferred": detected},
                            reason="no BIDS sidecar - fields inferred from NIfTI + filenames")

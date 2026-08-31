@@ -304,7 +304,7 @@ calibrated profiles — **adult** (the brain target) and **neonate** (the mentor
 neonatal domain). Pick one with `--population neonate` on the CLI, or
 `for_population("neonate")` in Python. Adult = White Paper (Alsop 2015) + Wu 2013;
 neonate = Miranda 2006. Other age groups are planned once their bands are
-calibrated with the mentors (see POPULATION_BANDS.md).
+calibrated with the mentors (see the population table in [THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md)).
 
 ---
 
