@@ -8,6 +8,21 @@ from __future__ import annotations
 import numpy as np
 
 
+def as_3d(volume):
+    """Drop a trailing singleton axis: (X, Y, Z, 1) IS a 3-D volume.
+
+    Several vendors write a single pre-subtracted deltaM into a 4-D container,
+    and NIfTI itself permits it. Rejecting the shape surfaced in the report as
+    "check error: ..." - a stack-trace fragment where a reader needs an
+    instruction - and it took a real, ordinary file to produce it.
+    """
+    import numpy as _np
+    arr = _np.asarray(volume)
+    while arr.ndim == 4 and arr.shape[3] == 1:
+        arr = arr[..., 0]
+    return arr
+
+
 def threshold_prob(prob: np.ndarray, thresh: float = 0.7) -> np.ndarray:
     """Binarise a probability map with a STRICT greater-than, matching the live
     ASLPrep compute_qei (`probseg > thresh`)."""

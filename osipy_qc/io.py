@@ -19,13 +19,17 @@ from .utils.masks import check_prob_range
 
 
 # A NIfTI header declares its shape, and gzip hides how big that will be. A 6 MB
-# file of zeros can declare 700^3 and expand to 2.7 GB as float64 — enough to
-# take down a small host. The header is readable before any data is touched, so
-# the size is checked there rather than discovered by running out of memory.
+# file of zeros can declare 700^3 and expand to 2.7 GB as float64 - enough to take
+# down a small host. The header is readable before any data is touched, so the
+# size is checked there rather than discovered by running out of memory.
 #
-# The ceiling is generous against real data: a 208x300x320 T1 is 160 MB and an
-# 80-volume 4D series about 141 MB, both far below it.
-MAX_ARRAY_BYTES = 768 * 1024 * 1024
+# Sized to the SMALLEST host this is deployed on, not to a comfortable desktop.
+# The free Render container has 512 MB for the WHOLE process, so a ceiling above
+# that could never protect it: a request declaring 700 MB passed the guard and
+# then OOM-killed the server. 192 MB still clears every real input by a wide
+# margin - a 208x300x320 T1 is 160 MB and an 80-volume 4-D series about 141 MB -
+# and a larger host can raise it with OSIPY_MAX_ARRAY_MB.
+MAX_ARRAY_BYTES = int(os.environ.get("OSIPY_MAX_ARRAY_MB", "192")) * 1024 * 1024
 
 
 def _load(path: str) -> np.ndarray:

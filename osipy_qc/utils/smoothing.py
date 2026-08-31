@@ -36,6 +36,13 @@ def smooth_fwhm(volume: np.ndarray, fwhm_mm: float = 5.0,
     as with any finite-support smoother).
     """
     vol = np.asarray(volume, dtype=float)
+    # A NIfTI written as (X, Y, Z, 1) - one volume in a 4-D container - is what
+    # several vendors emit for a single pre-subtracted deltaM. It IS a 3-D volume,
+    # so the singleton is dropped rather than rejected: raising here surfaced in
+    # the report as "check error: smooth_fwhm expects a 3-D volume", a
+    # stack-trace fragment where a reader needs an instruction.
+    if vol.ndim == 4 and vol.shape[3] == 1:
+        vol = vol[..., 0]
     if vol.ndim != 3:
         raise ValueError(f"smooth_fwhm expects a 3-D volume, got shape {vol.shape}")
     sigma_mm = fwhm_mm * _FWHM_TO_SIGMA

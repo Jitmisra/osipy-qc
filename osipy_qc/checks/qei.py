@@ -26,7 +26,7 @@ from ..core.config import QCConfig
 from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
 from ..utils.mathops import geometric_mean, pearson, pooled_within_tissue_variance
-from ..utils.masks import clean_nonfinite, threshold_prob
+from ..utils.masks import clean_nonfinite, threshold_prob, as_3d
 from ..utils.masks import check_prob_range
 from ..utils.smoothing import smooth_fwhm
 
@@ -113,6 +113,11 @@ def compute_qei(cbf, gm, wm, csf, cfg: QCConfig = QCConfig(),
 def qei_check(cbf=None, gm=None, wm=None, csf=None, cfg: QCConfig = QCConfig(),
               voxel_mm=(1.0, 1.0, 1.0), **_) -> CheckResult:
     """QC check wrapper around `compute_qei` with PASS/WARN/FAIL verdict."""
+    # (X, Y, Z, 1) is an ordinary way to store one volume, and NIfTI permits it.
+    # Squeeze before any arithmetic: unsqueezed, the 5 mm smoother rejected the
+    # shape and the report showed "check error: smooth_fwhm expects a 3-D volume"
+    # - a stack-trace fragment where a reader needs an instruction.
+    cbf, gm, wm, csf = (as_3d(x) if x is not None else None for x in (cbf, gm, wm, csf))
     if cbf is None or gm is None or wm is None or csf is None:
         return CheckResult("1.qei", Verdict.UNKNOWN,
                            reason="needs CBF map + GM/WM/CSF tissue maps in ASL space")

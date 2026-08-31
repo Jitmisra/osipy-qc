@@ -581,3 +581,34 @@ def test_the_provenance_counts_in_the_docs_are_current():
     readme = (pathlib.Path(__file__).resolve().parent.parent / "README.md").read_text()
     for level in ("published", "implementation", "uncalibrated"):
         assert f"({counts[level]}" in readme or f"**{counts[level]}" in readme, level
+
+
+def test_a_single_volume_in_a_4d_container_is_graded_not_rejected():
+    """(X, Y, Z, 1) is how several vendors write one pre-subtracted deltaM, and
+    NIfTI permits it. Unsqueezed it reached the 5 mm smoother, which raised, and
+    the report showed "check error: smooth_fwhm expects a 3-D volume" - a
+    stack-trace fragment where a reader needs an instruction."""
+    from osipy_qc.synth import synthetic_case
+    c = synthetic_case(quality="clean", seed=0)
+    flat = dict(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf,
+                brain=c.brain, voxel_mm=c.voxel_mm)
+    fourd = {k: (v[..., None] if isinstance(v, np.ndarray) else v)
+             for k, v in flat.items()}
+
+    a, b = run_qc(flat, cfg=QCConfig()), run_qc(fourd, cfg=QCConfig())
+    assert not [r for r in b.results if "check error" in r.reason]
+    qa = next(r for r in a.results if r.check == "1.qei")
+    qb = next(r for r in b.results if r.check == "1.qei")
+    assert qa.verdict is qb.verdict
+    assert qa.metric["qei"] == pytest.approx(qb.metric["qei"])
+
+
+def test_the_memory_guard_fits_inside_the_container_it_protects():
+    """MAX_ARRAY_BYTES was 805 MB while the free Render container has 512 MB for
+    the whole process, so the guard could never have protected the deployment:
+    a request declaring 700 MB passed it and then OOM-killed the server."""
+    from osipy_qc.io import MAX_ARRAY_BYTES
+    assert MAX_ARRAY_BYTES < 512 * 1024 * 1024
+    # and still clears the largest real input by a wide margin (a 208x300x320
+    # T1 is about 160 MB as float64)
+    assert MAX_ARRAY_BYTES > 170 * 1024 * 1024
