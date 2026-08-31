@@ -234,7 +234,7 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 
 ---
 
-## 6. What it checks (17 checks, 8 modules, two streams)
+## 6. What it checks (54 checks across three organs, two streams)
 
 **Stream B — is the CBF map good?**
 | Check | What |
@@ -273,10 +273,24 @@ Overall = **any FAIL → FAIL**, else **any WARN/UNKNOWN → WARN**, else **PASS
 ### Every threshold says where it came from
 Most of this field has **no published PASS/FAIL cutoffs** — ASLPrep, ExploreASL,
 MRIQC and fMRIPrep all report metrics and ship *zero* verdict logic. So rather than
-dress up guesses as evidence, each threshold is tagged **published** (11, each with
-a DOI), **implementation** (9), or **uncalibrated** (16, honestly declared).
-**Uncalibrated thresholds never drive a FAIL on their own**, and
-`QCConfig(strict=False)` softens the rest for clinical cohorts.
+dress up guesses as evidence, each threshold is tagged **published** (12, each with
+a DOI), **implementation** (16), or **uncalibrated** (32, honestly declared).
+
+A FAIL decided by an uncalibrated cut-off is marked **provisional** in the report.
+`--no-strict` (or `QCConfig(strict=False)`) demotes every provisional FAIL to a WARN,
+leaving only failures backed by a published threshold. On a deliberately broken scan
+that is the difference between four failures and two:
+
+| check | threshold | strict (default) | `--no-strict` |
+|---|---|---|---|
+| `1.qei` | published (Dolui 0.5) | FAIL | **FAIL** |
+| `3.2.gm_wm_ratio` | published (ASLPrep) | FAIL | **FAIL** |
+| `3.1.cbf_level` | uncalibrated | FAIL | WARN |
+| `3.3.negative_gm` | uncalibrated | FAIL | WARN |
+
+Strict grading is the default, so an uncalibrated number *can* reach a FAIL — what it
+cannot do is reach one **silently**. Earlier versions of this file claimed uncalibrated
+thresholds never fail at all; that was never true of the code.
 
 ```bash
 osipy-qc --provenance      # every number, its source, and what that source says

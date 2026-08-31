@@ -153,11 +153,13 @@ once their bands are calibrated with the mentors (see POPULATION_BANDS.md).
 from osipy_qc.core.config import provenance_of, uncalibrated_fields
 
 provenance_of("gm_cbf_lo")   # (PUBLISHED, 'Alsop 2015 ... doi:10.1002/mrm.25197', 'verbatim: "40-100 ..."')
-uncalibrated_fields()        # the 16 numbers we cannot cite
+uncalibrated_fields()        # the 32 numbers we cannot cite
 ```
 Every threshold is tagged **published** (a paper states it), **implementation**
 (reference code uses it), or **uncalibrated** (our engineering default).
-**Uncalibrated thresholds never drive a FAIL on their own.** Run
+A FAIL decided by an uncalibrated cut-off is marked **provisional**, and
+`--no-strict` demotes every provisional FAIL to a WARN. Strict is the default, so an
+uncalibrated number *can* reach a FAIL — it simply cannot do so silently. Run
 `osipy-qc --provenance` for the full dump, or see
 [THRESHOLD_PROVENANCE.md](THRESHOLD_PROVENANCE.md).
 

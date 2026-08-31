@@ -522,3 +522,62 @@ def test_the_report_names_the_map_after_its_organ():
         assert f"Checks &mdash; {section}" in html, organ
         assert title in html, organ
         assert "axial" not in html.lower(), organ
+
+
+def test_the_documented_strict_contract_is_the_real_one():
+    """README and USAGE both claimed "uncalibrated thresholds never drive a FAIL
+    on their own". That was never true of the code: strict=True is the default
+    and five FAIL branches are gated on it. The real contract is weaker and is
+    what the docs now state - an uncalibrated FAIL is marked provisional, and
+    --no-strict demotes every provisional FAIL, leaving the published ones."""
+    from osipy_qc.synth import synthetic_case
+    c = synthetic_case(quality="garbage", seed=0)
+    inputs = dict(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf,
+                  brain=c.brain, voxel_mm=c.voxel_mm)
+
+    strict = run_qc(inputs, cfg=QCConfig(strict=True))
+    lenient = run_qc(inputs, cfg=QCConfig(strict=False))
+    f_strict = {r.check: r.provisional for r in strict.results if r.verdict.value == "FAIL"}
+    f_lenient = {r.check: r.provisional for r in lenient.results if r.verdict.value == "FAIL"}
+
+    # an uncalibrated cut-off DOES reach a FAIL by default - the docs must not
+    # claim otherwise
+    assert any(prov for prov in f_strict.values())
+    # every surviving failure is non-provisional, i.e. published-backed
+    assert f_lenient and not any(f_lenient.values())
+    assert set(f_lenient) < set(f_strict)
+
+
+def test_the_docs_do_not_claim_uncalibrated_never_fails():
+    """The claim was in two shipped files. A future edit must not reintroduce
+    it, because it is the one guarantee a reviewer would check first."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for name in ("README.md", "USAGE.md"):
+        text = (root / name).read_text()
+        assert "never drive a FAIL on their own" not in text, name
+        assert "provisional" in text, f"{name} must explain the real contract"
+
+
+def test_no_strict_is_reachable_from_the_command_line():
+    """The documented remedy was QCConfig(strict=False) - Python-API only - so a
+    CLI or website user had no way to opt out of a grading rule the docs told
+    them they could turn off."""
+    import osipy_qc.cli as cli
+    src = open(cli.__file__).read()
+    assert '"--no-strict"' in src
+    assert "strict=not args.no_strict" in src
+
+
+def test_the_provenance_counts_in_the_docs_are_current():
+    """README and USAGE both printed 11/9/16 while the config held 12/16/32 - a
+    board member running `osipy-qc --provenance` would see a 2x discrepancy."""
+    import pathlib
+    from osipy_qc.core.config import THRESHOLD_PROVENANCE, uncalibrated_fields
+    counts = {}
+    for _k, (level, _c, _n) in THRESHOLD_PROVENANCE.items():
+        counts[level.value] = counts.get(level.value, 0) + 1
+    assert len(uncalibrated_fields()) == counts["uncalibrated"]
+    readme = (pathlib.Path(__file__).resolve().parent.parent / "README.md").read_text()
+    for level in ("published", "implementation", "uncalibrated"):
+        assert f"({counts[level]}" in readme or f"**{counts[level]}" in readme, level

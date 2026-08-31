@@ -114,6 +114,11 @@ def main(argv=None) -> int:
                     help="write a self-contained visual HTML report to PATH")
     ap.add_argument("--population", default="adult",
                     help="population for the CBF bands: adult or neonate (default: adult)")
+    ap.add_argument("--no-strict", action="store_true",
+                    help="demote every PROVISIONAL failure to a warning. A provisional FAIL is "
+                         "one decided by an uncalibrated cut-off - an engineering default with "
+                         "no published derivation. Strict grading is the default; this is the "
+                         "escape hatch for a clinical cohort where a guess must not reject a scan.")
     ap.add_argument("--organ", default="brain", choices=["brain", "kidney", "placenta"],
                     help="which organ's check set to run (default: brain). Each organ has "
                          "its own checks: brain 20, kidney 19, placenta 15.")
@@ -166,13 +171,17 @@ def main(argv=None) -> int:
 
     from .core.config import for_population
     try:
-        cfg = _replace(for_population(args.population), organ=args.organ)
+        cfg = _replace(for_population(args.population), organ=args.organ,
+                       strict=not args.no_strict)
     except ValueError as exc:
         ap.error(str(exc))
         return 2
 
     if args.organ_demo:
         demo_inputs, demo_cfg = _organ_demo_inputs(args.organ_demo)
+        # the demo builds its own config for the organ, but the user's grading
+        # choice still applies - otherwise --no-strict is silently ignored here
+        demo_cfg = _replace(demo_cfg, strict=not args.no_strict)
         report = run_qc(demo_inputs, cfg=demo_cfg)
         _print_report(report)
         if args.json:
