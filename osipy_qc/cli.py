@@ -12,6 +12,7 @@ import argparse
 import os
 
 from .core.config import Provenance, THRESHOLD_PROVENANCE
+from .core.result import coverage
 
 from .report import run_qc
 
@@ -27,7 +28,8 @@ def _print_provenance() -> None:
         Provenance.PUBLISHED: "PUBLISHED - a paper states this number for this purpose",
         Provenance.IMPLEMENTATION: "IMPLEMENTATION - reference code uses it; no paper states it",
         Provenance.UNCALIBRATED: ("UNCALIBRATED - our engineering default, NOT calibrated. "
-                                  "These never FAIL alone."),
+                                  "A FAIL decided by one of these is marked provisional; "
+                                  "--no-strict demotes it to a WARN."),
     }
     for level in order:
         rows = [(f, c, n) for f, (lv, c, n) in THRESHOLD_PROVENANCE.items() if lv is level]
@@ -46,6 +48,20 @@ def _print_report(report) -> None:
           f"=== ({report.to_dict()['summary']})\n")
     for r in report.results:
         print(f"  {bar.get(r.verdict.value, ' ')} {r.check:22s} {r.verdict.value:8s} {r.reason}")
+    # The verdict alone says "of what could be measured, this is the worst of it"
+    # and nothing about how much WAS measured - a PASS over 4 checks and a PASS
+    # over 18 are different claims. The JSON and the HTML report have always
+    # carried coverage beside the verdict; the terminal did not, which made it
+    # the one output that could show a bare PASS on an almost-empty report.
+    cov = coverage(report.results)
+    if cov["complete"]:
+        print(f"\n  coverage: all {cov['graded']} applicable checks were decided.")
+    else:
+        missing = ", ".join(cov["missing"][:6])
+        more = f" (+{len(cov['missing']) - 6} more)" if len(cov["missing"]) > 6 else ""
+        print(f"\n  coverage: {cov['graded']} of {cov['total']} applicable checks decided; "
+              f"{cov['unknown']} had no input to look at.")
+        print(f"            not decided: {missing}{more}")
     print()
 
 

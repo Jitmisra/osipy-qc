@@ -4,6 +4,12 @@ A Python library that grades an ASL-derived **CBF map** (and the **raw data**) a
 returns a **PASS / WARN / FAIL** verdict per check, with reasons — to triage bad
 scans automatically in large multi-center studies.
 
+**Three organs.** Brain is the v1.0 target and the only one with a published
+quality index behind it. **Kidney** and **placenta** ship too, because ASL is used
+in both and neither has a QC tool at all — but they are built to a stricter honesty
+rule than brain: where the consensus literature states no number, the check reports
+and refuses to grade rather than inventing a cut-off. See §6.
+
 It is a **QC layer, not a processing pipeline**: it *grades* data, it does not
 reprocess it. Heavy steps (CBF quantification, T1 segmentation, co-registration)
 belong to PyASL / ASLPrep / oxford_asl; this toolbox sits downstream and judges
@@ -234,7 +240,31 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 
 ---
 
-## 6. What it checks (54 checks across three organs, two streams)
+## 6. What it checks — 54 checks, three organs, two streams
+
+Two streams run against every organ: **Stream B** asks *is the perfusion map good?*,
+**Stream A** asks *was the raw scan acquired correctly?* Pick the organ with
+`--organ kidney` on the CLI, or in Python:
+
+```python
+from osipy_qc import run_qc
+from osipy_qc.core.config import QCConfig
+from osipy_qc.io import load_organ_folder
+
+report = run_qc(load_organ_folder("data/my_kidney_scan", "kidney"),
+                cfg=QCConfig(organ="kidney"))
+```
+
+Only that organ's checks run. `load_organ_folder` is the loader that routes masks —
+the brain loader has no concept of them and would silently drop every one.
+
+| organ | checks | what backs the numbers |
+|---|---:|---|
+| [brain](#brain--20-checks) | 20 | QEI (Dolui 2024), ASL White Paper, ASLPrep, ExploreASL |
+| [kidney](#kidney--19-checks) | 19 | Nery 2020 renal consensus — 59 statements, **zero numeric thresholds** |
+| [placenta](#placenta--15-checks) | 15 | Taso 2023 — neither recommendations nor summarised practice |
+
+### brain — 20 checks
 
 **Stream B — is the CBF map good?**
 | Check | What |
@@ -247,6 +277,7 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 | `3.2.gm_wm_ratio` | GM brighter than WM (scale-free) |
 | `3.3.negative_gm` | fraction of negative GM voxels |
 | `3.4.deep_gm_ratio` | **neonatal** — deep GM should exceed cortical GM (Miranda 2006) |
+| `3.5.brain_cbf` | whole-brain CBF over a self-derived mask — the only magnitude check that runs with **no tissue maps** |
 | `4.1.coregistration` | Dice / Jaccard of ASL vs T1 mask |
 | `4.2.coverage` | how much of the tissue ROI the ASL actually imaged (FOV mismatch) |
 
@@ -263,12 +294,85 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 | `7.1.motion` | framewise displacement (Power 2012) + DVARS |
 | `8.2.data_type` | vendor / 2D-3D / structure inference (routing) |
 
-### Verdicts
-`PASS` · `WARN` · `FAIL` · `UNKNOWN` (a check that *should* run but couldn't — escalates the
-overall to WARN) · `N/A` (structurally inapplicable — excluded) · `INFO` (reported, not
-graded — excluded).
+### kidney — 19 checks
 
-Overall = **any FAIL → FAIL**, else **any WARN/UNKNOWN → WARN**, else **PASS**.
+The renal consensus (Nery 2020, MAGMA/PARENCHIMA) is 59 statements and **not one
+numeric quality threshold**. So most of these checks report a number and mark it
+INFO; the ones that grade, grade on structure (is the mask sane, is the geometry
+one grid, was the M0 clean) rather than on a perfusion value we cannot cite.
+
+**Stream B — is the RBF map good?**
+| Check | What |
+|---|---|
+| `k1.1.renal_qei` | **always N/A** — no renal QEI exists, and inventing one is the single worst thing this tool could do |
+| `k2.1.tsnr` | temporal SNR per kidney — **INFO only** |
+| `k2.2.pws_pct` | perfusion-weighted signal as a % of M0 |
+| `k2.3.implausible_values` | fraction of within-kidney voxels that are physically impossible |
+| `k3.1.cortical_rbf` | cortical RBF **per kidney separately** (Nery R10.1, 100% agreement), against a sanity bound only |
+| `k3.2.cmr` | cortico-medullary ratio — a **segmentation-integrity** flag, not a perfusion verdict (R10.2: medullary values are unreliable) |
+| `k3.3.left_right` | left-vs-right consistency — a review flag, never a rejection |
+| `k4.1.mask_integrity` | is each supplied mask one sane, unclipped object? |
+| `k4.2.registration` | one geometry, registration scope, centroid residual |
+| `k4.3.slice_coverage` | share of kidney-bearing slices that carry usable data |
+
+**Stream A — was the raw scan acquired correctly?**
+| Check | What |
+|---|---|
+| `k5.1.metadata` | how many of the nine consensus-reportable acquisition facts are present |
+| `k5.2.data_type` | routing — what kind of renal dataset is this (INFO) |
+| `k5.3.swap` | control/label ordering, judged **per pair** not on the pooled mean |
+| `k6.1.m0_present` · `k6.2.m0_clean` · `k6.3.m0_tr` | M0 exists, carries no labelling or BS, and relaxed fully |
+| `k7.1.kidney_displacement` | per-kidney respiratory displacement, per anatomical axis |
+| `k7.2.outlier_rate` | subtraction-outlier rejection — the one genuinely implementable published renal number |
+| `k7.3.breathing_strategy` | which breathing strategy, and how efficient the gating was |
+
+### placenta — 15 checks
+
+Even thinner ground: Taso 2023 offers neither recommendations nor summarised
+practice. The design consequence is that **P2.1 is a gate** — until the map's units
+are declared, nothing numeric downstream is allowed to grade.
+
+**Stream B — is the perfusion map good?**
+| Check | What |
+|---|---|
+| `p1.1.placental_qei` | **always N/A** — no placental quality index exists |
+| `p2.1.units_declaration` | **the gate**: what do this map's numbers mean? Everything numeric waits on it |
+| `p2.2.implausible_values` | negative / non-finite / upper-outlier fractions inside the placenta |
+| `p2.3.segment_cov` | within-placenta heterogeneity — **INFO only** |
+| `p3.1.mask_integrity` | one sane object, right grid, and where the mask came from |
+| `p3.2.slab_coverage` | does the imaging slab actually contain the whole placenta? |
+
+**Stream A — was the raw scan acquired correctly?**
+| Check | What |
+|---|---|
+| `p4.1.labelling_scheme` | which scheme — and therefore **which circulation** was measured (FAIR labels both) |
+| `p4.2.ga_context` | gestational age and maternal/scanner context |
+| `p5.1.m0_state` | present, unlabelled, and not background-suppressed (a BS'd M0 never PASSes) |
+| `p5.2.m0_heterogeneity` | how structured the M0 is inside the placenta |
+| `p5.3.quant_constants` | are the quantification constants recorded, T1-blood consistent |
+| `p6.1.pair_outliers` | per-pair subtraction outlier rejection |
+| `p6.2.temporal_sd` | temporal stability after motion correction |
+| `p6.3.registration_residual` | was a deformable registration used, how much residual deformation |
+| `p6.4.contraction_events` | candidate uterine contraction events — **INFO only** |
+
+### Verdicts
+`PASS` · `WARN` · `FAIL` · `UNKNOWN` (a check that *should* run but had no input to look
+at) · `N/A` (structurally inapplicable) · `INFO` (reported, not graded).
+
+Overall = **any FAIL → FAIL**, else **any WARN → WARN**, else **PASS**, else **UNKNOWN**.
+UNKNOWN, N/A and INFO are excluded from that: they report an absence, not a finding.
+
+So the overall verdict says *"of what could be measured, this is the worst of it"* — and
+nothing about **how much** could be measured. That is what `coverage()` carries, and every
+report prints it beside the verdict:
+
+```python
+from osipy_qc.core.result import coverage
+coverage(report.results)   # {'graded': 14, 'total': 18, 'unknown': 4, 'complete': False, ...}
+```
+
+A PASS over 4 graded checks and a PASS over 18 are different claims. Showing one without
+the other misrepresents it, so the CLI, the JSON and the HTML report all carry both.
 
 ### Every threshold says where it came from
 Most of this field has **no published PASS/FAIL cutoffs** — ASLPrep, ExploreASL,
@@ -311,7 +415,7 @@ calibrated with the mentors (see the population table in [THRESHOLD_PROVENANCE.m
 ## 7. Tests
 
 ```bash
-python -m pytest -q        # 72 known-answer tests
+python -m pytest -q        # 465 known-answer tests
 ```
 
 Every check has **known-answer** tests (hand-computed expected values); the QEI is
@@ -325,15 +429,17 @@ osipy-qc/
     core/          registry, result/verdict, config (thresholds + provenance +
                    population/organ profiles)
     utils/         mathops, smoothing (pure-NumPy Gaussian), masks (coverage-aware),
+                   roi (mask-first ROI toolkit: components, SSIM, asymmetry),
                    imaging (stdlib-only PNG/SVG encoders)
-    checks/        one module per QC module (qei, noise, cbf_level, coreg, schema, m0, motion)
+    checks/        brain: qei, noise, cbf_level, coreg, schema, m0, motion
+                   other organs: kidney, placenta
     synth.py       synthetic data with known quality
     io.py          NIfTI loaders + grade_cbf / find_oxford_asl / find_aslprep
     report.py      the runner + JSON report
     report_html.py the visual report (images, histograms, provenance)
     web.py         the local web UI (osipy-qc --serve)
     cli.py         command line
-  tests/           known-answer tests per module (136)
+  tests/           known-answer tests per module (27 files, 465 tests)
   examples/        run_examples.py, grade_cbf_map.py
   example_data/    small synthetic CBF + tissue maps (safe demo data — committed)
   data/            <- put YOUR scans here (git-ignored, never committed)
