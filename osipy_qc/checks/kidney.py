@@ -466,12 +466,29 @@ def renal_implausible_check(rbf_map=None, kidney_masks=None, cortex_masks=None,
     shown = (f"negative {_fmt_sides({s: 100 * x for s, x in neg.items()}, '{:.1f}%')}, "
              f"over {ceiling:.0f}: {_fmt_sides({s: 100 * x for s, x in over.items()}, '{:.1f}%')}")
 
+    # Two different FAILs, because two different things license them.
+    #
+    # Above half, the SIGN decides: more than half the measured voxels are
+    # negative, so whatever this is, it is not a map of blood flow. That argument
+    # needs no calibration, which is why this branch is not provisional and
+    # --no-strict does not demote it.
+    #
+    # Between the 20% line and half, only the uncalibrated threshold decides, so
+    # that FAIL stays provisional. The reason must say so: this branch used to
+    # print "a majority-negative map ... is not a perfusion map" for ANY fraction
+    # over 20%, so a map that was 25% negative was told it was majority-negative -
+    # contradicted by the metric printed in the same sentence.
+    if worst_neg > 0.5:
+        sides = [s for s, v in neg.items() if v > 0.5]
+        return CheckResult("k2.3.implausible_values", Verdict.FAIL, metric=metric,
+                           reason=f"{shown} - most of the map is negative on "
+                                  f"{', '.join(sides)}, so it is not a perfusion map")
     if worst_neg > cfg.kidney_frac_fail:
         sides = [s for s, v in neg.items() if v > cfg.kidney_frac_fail]
         verdict = Verdict.FAIL if cfg.strict else Verdict.WARN
         return CheckResult("k2.3.implausible_values", verdict, metric=metric, provisional=True,
-                           reason=f"{shown} - a majority-negative map on {', '.join(sides)} is "
-                                  "not a perfusion map")
+                           reason=f"{shown} - more than {cfg.kidney_frac_fail:.0%} of cortical "
+                                  f"voxels are negative on {', '.join(sides)}")
     # NOTE: the design's verdict table scopes FAIL to the NEGATIVE fraction only,
     # and its WARN row covers "either fraction in 5-20%", leaving over-ceiling
     # above 20% matching no row. Treated as WARN (the most severe verdict the

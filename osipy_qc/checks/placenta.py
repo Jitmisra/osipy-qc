@@ -266,6 +266,15 @@ def placenta_implausible_check(perfusion_map=None, placenta_mask=None, declared_
     if nonfinite_frac > cfg.placenta_nonfinite_fail:
         return CheckResult("p2.2.implausible_values", Verdict.FAIL, metric=metric,
                            reason=f"{shown} - the map is mostly absent inside its own mask")
+    # The same sign argument the renal module already accepts: once more than half
+    # the finite voxels are negative, the object is not a perfusion map, and no
+    # calibration is needed to say so. Without this branch a 67%-negative map came
+    # back WARN here while the identical situation FAILed in kidney - the same
+    # physics reaching two different verdicts depending on the organ.
+    elif np.isfinite(neg_frac) and neg_frac > 0.5:
+        return CheckResult("p2.2.implausible_values", Verdict.FAIL, metric=metric,
+                           reason=f"{shown} - most of the map is negative, so it is not a "
+                                  "perfusion map")
     if (np.isfinite(neg_frac) and neg_frac > cfg.placenta_neg_frac_warn) or (
             np.isfinite(upper_frac) and upper_frac > cfg.placenta_upper_frac_warn):
         return CheckResult("p2.2.implausible_values", Verdict.WARN, metric=metric, provisional=True,

@@ -275,8 +275,21 @@ def test_strict_can_be_turned_off_for_every_organ():
     and placenta - the two organs where it matters most, since almost all their
     thresholds are uncalibrated."""
     g = synthetic_kidney_case(quality="garbage", seed=0)
+    # The garbage phantom is 62% negative, which now trips the sign-licensed FAIL
+    # that --no-strict deliberately does NOT demote. To keep testing the toggle,
+    # the map has to fail via the PROVISIONAL branch instead - so bring the
+    # negative fraction into the 20-50% band, above the uncalibrated line and
+    # below a majority.
+    rbf = np.asarray(g.rbf, dtype=float).copy()
+    cortex = np.zeros(rbf.shape, bool)
+    for _side, _m in g.cortex_masks.items():
+        cortex |= np.asarray(_m) > 0.5
+    idx = np.flatnonzero(cortex.ravel())
+    flat = rbf.ravel()
+    flat[idx] = 200.0                                  # a plausible cortical RBF
+    flat[idx[:int(0.30 * idx.size)]] = -40.0           # 30%: failing, not a majority
     vox = (2.0, 2.0, 8.0)
-    base = _part("cbf", "r.nii.gz", _nii(g.rbf, vox))
+    base = _part("cbf", "r.nii.gz", _nii(rbf, vox))
     for side in ("left", "right"):
         base += _part(f"kidney__cortex_{side}", "c.nii.gz", _nii(g.cortex_masks[side], vox))
     base += (_part("kidney__units", data=b"mL/100g/min")

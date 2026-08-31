@@ -13,6 +13,8 @@ numbers but the DESIGN DECISIONS that keep the module honest:
   confident number computed from noise (P6.3).
 """
 
+from dataclasses import replace as _replace
+
 import numpy as np
 import pytest
 
@@ -126,12 +128,36 @@ def test_p2_2_fails_only_when_the_map_is_mostly_absent():
     assert "mostly absent" in r.reason
 
 
-def test_p2_2_warns_on_a_majority_negative_map():
+def test_p2_2_fails_a_majority_negative_map_on_the_sign_alone():
+    """Once most of the finite voxels are negative the object is not a perfusion
+    map, and no calibration is needed to say so - the same argument the renal
+    module already makes. This used to return WARN here and FAIL in kidney: the
+    same physics reaching two different verdicts depending on the organ.
+
+    Being licensed by the sign rather than by a threshold, it is not provisional,
+    so --no-strict does not demote it either.
+    """
     c = synthetic_placenta_case(quality="garbage", seed=0)
-    r = placenta_implausible_check(perfusion_map=c.perfusion, placenta_mask=c.placenta_mask,
+    for strict in (True, False):
+        r = placenta_implausible_check(perfusion_map=c.perfusion, placenta_mask=c.placenta_mask,
+                                       declared_units="mL/100g/min",
+                                       cfg=_replace(CFG, strict=strict))
+        assert r.verdict is Verdict.FAIL
+        assert not r.provisional
+        assert r.metric["negative_fraction"] > 0.5
+        assert "most of the map is negative" in r.reason
+
+
+def test_p2_2_only_warns_below_a_majority():
+    """The band between the uncalibrated 10% line and a majority stays a WARN -
+    the sign argument does not reach down there."""
+    perf = np.full((12, 12, 12), 60.0)
+    mask = np.ones((12, 12, 12))
+    perf.reshape(-1)[:int(0.30 * perf.size)] = -20.0
+    r = placenta_implausible_check(perfusion_map=perf, placenta_mask=mask,
                                    declared_units="mL/100g/min", cfg=CFG)
     assert r.verdict is Verdict.WARN
-    assert r.metric["negative_fraction"] > 0.5
+    assert "most of the map" not in r.reason
 
 
 def test_p2_3_heterogeneity_is_reported_and_never_graded(clean):

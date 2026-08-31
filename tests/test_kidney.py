@@ -14,6 +14,8 @@ Two things these tests protect, beyond "the code runs":
 Anything traceable to real data is marked REAL-DATA and names the dataset.
 """
 
+from dataclasses import replace as _replace
+
 import numpy as np
 import pytest
 
@@ -640,3 +642,39 @@ def test_k4_3_zero_usable_slices_is_unknown_not_fail():
                                     voxel_mm=(8.0, 2.0, 2.0), cfg=CFG)
     assert r.verdict is Verdict.UNKNOWN
     assert "no ROI statistic" in r.reason
+
+
+def test_k2_3_never_calls_a_minority_of_negative_voxels_a_majority():
+    """The FAIL reason said "a majority-negative map ... is not a perfusion map"
+    for ANY negative fraction over the 20% line, so a map that was 25% negative
+    was told it was majority-negative - contradicted by the metric printed in the
+    same sentence.
+
+    The two FAILs are licensed differently and must read differently: above half
+    the SIGN decides and no calibration is involved, so that one is not
+    provisional and --no-strict leaves it alone; between 20% and half only the
+    uncalibrated threshold decides, so that one stays provisional.
+    """
+    m = np.ones((10, 10, 10))
+
+    def grade(frac, strict=True):
+        vol = np.full((10, 10, 10), 200.0)
+        vol.reshape(-1)[:int(frac * vol.size)] = -50.0
+        return all_checks()["k2.3.implausible_values"]["fn"](
+            rbf_map=vol, kidney_masks={"left": m, "right": m},
+            cortex_masks={"left": m, "right": m}, units="mL/100g/min",
+            cfg=_replace(CFG, strict=strict))
+
+    minority = grade(0.25)
+    assert minority.verdict is Verdict.FAIL
+    assert minority.provisional
+    assert "majority" not in minority.reason.lower()
+    assert "most of the map" not in minority.reason
+    assert grade(0.25, strict=False).verdict is Verdict.WARN   # provisional: demotable
+
+    majority = grade(0.62)
+    assert majority.verdict is Verdict.FAIL
+    assert not majority.provisional
+    assert "most of the map is negative" in majority.reason
+    # licensed by the sign, so turning strict off must NOT demote it
+    assert grade(0.62, strict=False).verdict is Verdict.FAIL
