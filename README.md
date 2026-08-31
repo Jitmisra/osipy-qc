@@ -415,7 +415,7 @@ calibrated with the mentors (see the population table in [THRESHOLD_PROVENANCE.m
 ## 7. Tests
 
 ```bash
-python -m pytest -q        # 465 known-answer tests
+python -m pytest -q        # 477 known-answer tests
 ```
 
 Every check has **known-answer** tests (hand-computed expected values); the QEI is
@@ -439,7 +439,7 @@ osipy-qc/
     report_html.py the visual report (images, histograms, provenance)
     web.py         the local web UI (osipy-qc --serve)
     cli.py         command line
-  tests/           known-answer tests per module (27 files, 465 tests)
+  tests/           known-answer tests per module (28 files, 477 tests)
   examples/        run_examples.py, grade_cbf_map.py
   example_data/    small synthetic CBF + tissue maps (safe demo data — committed)
   data/            <- put YOUR scans here (git-ignored, never committed)

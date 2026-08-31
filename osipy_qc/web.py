@@ -1239,11 +1239,19 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
         root = _spa_root()
         if root is None:
             return False
+        # realpath both sides: a prefix test on un-resolved paths is defeated by a
+        # symlink inside the build directory as well as by `..`.
+        root = os.path.realpath(root)
         index = os.path.join(root, "index.html")
         rel = path.lstrip("/") or "index.html"
-        target = os.path.normpath(os.path.join(root, rel))
-        # never serve outside the build directory
-        if not target.startswith(root) or not os.path.isfile(target):
+        target = os.path.realpath(os.path.join(root, rel))
+        # Never serve outside the build directory. This is a prefix test on path
+        # SEGMENTS, not on the string: bare `startswith(root)` also accepts every
+        # sibling whose name merely begins with the root's, so with a build root
+        # of .../web/dist a request for `/../dist-secrets/creds.js` normalised to
+        # .../web/dist-secrets/creds.js, passed the guard, and was served. Verified
+        # reachable over a raw socket - a browser rewrites `..` but nothing else has to.
+        if not _within(target, root) or not os.path.isfile(target):
             if "." in posixpath.basename(path):
                 return False            # a missing asset, not a route
             target = index
@@ -1479,6 +1487,19 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 400)
             else:
                 self._send(_upload_page(error=f"{type(exc).__name__}: {exc}"), 400)
+
+
+def _within(target: str, root: str) -> bool:
+    """Is `target` inside `root`, comparing path SEGMENTS rather than characters?
+
+    `target.startswith(root)` is the classic wrong version of this test: it is a
+    string comparison, so with root `/srv/web/dist` it happily accepts
+    `/srv/web/dist-secrets/creds.js`. Both arguments should already be realpath'd
+    by the caller, so this only has to get the segment boundary right.
+    """
+    import os
+
+    return target == root or target.startswith(root.rstrip(os.sep) + os.sep)
 
 
 def _spa_root() -> str | None:

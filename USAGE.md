@@ -18,6 +18,10 @@ osipy-qc <folder>                # QC a folder of raw NIfTIs (Stream A)
 osipy-qc <folder> --json         # same, machine-readable JSON
 osipy-qc --demo --html r.html    # write a self-contained visual report
 osipy-qc --provenance            # where every threshold came from
+osipy-qc --organ kidney <folder> # grade a kidney dataset (19 checks) instead of a brain one
+osipy-qc --organ-demo placenta   # see an organ's report without owning data of that organ
+osipy-qc --dashboard output/     # grade a whole cohort into one sortable page
+osipy-qc --version               # which build produced this report
 python -m osipy_qc <folder>      # identical, module form
 ```
 
@@ -32,6 +36,13 @@ python -m osipy_qc <folder>      # identical, module form
 | `--serve` | flag | start the local web UI (upload → report) |
 | `--port N` | int | port for `--serve` (default 8000) |
 | `--no-browser` | flag | with `--serve`, don't auto-open a browser |
+| `--host ADDR` | str | bind address for `--serve` (default `127.0.0.1`). Anything other than loopback is a **public** bind and disables the DNS-rebinding guard, so it must be typed deliberately — it is not read from the environment. |
+| `--organ NAME` | str | which organ's check set to run: `brain` (default, 20 checks), `kidney` (19), `placenta` (15). Uses the mask-aware loader, so masks are routed rather than dropped. |
+| `--organ-demo NAME` | str | grade a synthetic phantom of known quality for that organ. Lets you see a kidney or placenta report without owning data of either. |
+| `--dashboard DIR` | path | grade every subject folder under `DIR` and write one sortable cohort page |
+| `--dashboard-demo` | flag | the same cohort page, built from synthetic subjects |
+| `--no-strict` | flag | demote every *provisional* FAIL (one decided by an uncalibrated threshold) to a WARN, leaving only published-threshold failures |
+| `--version` | flag | print the version and exit |
 
 ### The web UI
 ```bash
@@ -44,9 +55,16 @@ memory so their figures can be drawn on demand; they are evicted as new uploads
 arrive and are gone when the process stops. Nothing is written to disk and
 nothing is sent anywhere.
 
-> ⚠️ This is a **local** tool. It binds to `127.0.0.1` and is deliberately not
-> hardened for public hosting (no auth, no rate limiting, no sandboxing around the
-> NIfTI parser). Public deployment is a separate job.
+> ⚠️ **Local by default, and that default matters.** The server binds `127.0.0.1`
+> and refuses requests whose `Host` header is not loopback (a DNS-rebinding guard).
+> There is no auth, no rate limiting, and no sandbox around the NIfTI parser.
+>
+> `--host 0.0.0.0` makes it public and turns that guard off, which is why the flag
+> exists but is never read from the environment — a stray `HOST` variable used to be
+> enough to move the bind off loopback silently. The public demo at
+> [osipy-qc.onrender.com](https://osipy-qc.onrender.com) runs exactly that way,
+> deliberately, on synthetic and user-supplied uploads only. **Do not point a public
+> instance at real participant data.**
 
 ---
 

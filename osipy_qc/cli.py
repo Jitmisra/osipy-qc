@@ -12,6 +12,7 @@ import argparse
 import os
 
 from .core.config import Provenance, THRESHOLD_PROVENANCE
+from . import __version__
 from .core.result import coverage
 
 from .report import run_qc
@@ -135,6 +136,10 @@ def main(argv=None) -> int:
                          "one decided by an uncalibrated cut-off - an engineering default with "
                          "no published derivation. Strict grading is the default; this is the "
                          "escape hatch for a clinical cohort where a guess must not reject a scan.")
+    ap.add_argument("--version", action="version",
+                    version=f"osipy-qc {__version__}",
+                    help="print the version and exit (a report's provenance is only "
+                         "meaningful next to the version that produced it)")
     ap.add_argument("--organ", default="brain", choices=["brain", "kidney", "placenta"],
                     help="which organ's check set to run (default: brain). Each organ has "
                          "its own checks: brain 20, kidney 19, placenta 15.")

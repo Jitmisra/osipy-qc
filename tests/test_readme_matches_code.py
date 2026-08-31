@@ -110,3 +110,23 @@ def test_the_readme_aggregation_rule_matches_aggregate():
 def test_the_coverage_keys_the_readme_prints_are_the_real_ones():
     shown = set(re.findall(r"'(\w+)':", README.split("coverage(report.results)")[1][:160]))
     assert shown <= set(coverage([])), f"README shows coverage keys that do not exist: {shown}"
+
+
+def test_every_cli_flag_is_documented_in_usage():
+    """USAGE.md was missing five flags, including --organ - the one that selects
+    two thirds of the tool's checks."""
+    cli = (ROOT / "osipy_qc" / "cli.py").read_text()
+    usage = (ROOT / "USAGE.md").read_text()
+    flags = sorted(set(re.findall(r'add_argument\("(--[\w-]+)', cli)))
+    missing = [f for f in flags if f not in usage]
+    assert not missing, f"CLI flags with no entry in USAGE.md: {missing}"
+
+
+def test_the_version_flag_reports_the_package_version():
+    import subprocess
+    import sys
+
+    from osipy_qc import __version__
+    out = subprocess.run([sys.executable, "-m", "osipy_qc", "--version"],
+                         capture_output=True, text=True, cwd=ROOT)
+    assert __version__ in out.stdout + out.stderr
