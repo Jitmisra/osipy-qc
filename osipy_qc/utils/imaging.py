@@ -245,9 +245,17 @@ def _esc(s) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def colorbar_svg(vmin: float, vmax: float, width: int = 280, height: int = 46,
+def colorbar_svg(vmin: float, vmax: float, width: int = 820, height: int = 62,
                  label: str = CBF_UNITS, n: int = 96) -> str:
     """The colour scale for a mosaic: the ramp, numeric ticks and the unit.
+
+    The viewBox is WIDE on purpose. The report stretches this SVG to the figure
+    width with `width:100%`, so everything inside it scales by that ratio - at
+    the old 280 px viewBox a font-size of 10 was blown up about sixfold and the
+    tick labels came out several times larger than the caption beneath them,
+    with a colour bar taller than it had any reason to be. Text size here is a
+    FRACTION OF THE VIEWBOX, not an absolute, so the way to make the labels
+    smaller is to make the viewBox wider.
 
     A mosaic without this is a pretty picture — the reviewer cannot tell 60 from
     600, which is the difference between a healthy scan and a broken M0.
@@ -287,11 +295,11 @@ def colorbar_svg(vmin: float, vmax: float, width: int = 280, height: int = 46,
     for i, px in enumerate(swatches):
         fill = "#%02x%02x%02x" % tuple(int(c) for c in px)
         # +0.6 overlap: abutting rects at fractional x leave hairline seams
-        parts.append(f'<rect x="{x0 + i * bw:.1f}" y="4" width="{bw + 0.6:.1f}" height="13" '
+        parts.append(f'<rect x="{x0 + i * bw:.1f}" y="6" width="{bw + 0.6:.1f}" height="20" '
                      f'fill="{fill}"/>')
     # An outline, because the ramp's top end is a pale yellow that otherwise
     # bleeds into the page and hides where the scale stops.
-    parts.append(f'<rect x="{x0:.1f}" y="4" width="{pw:.1f}" height="13" fill="none" '
+    parts.append(f'<rect x="{x0:.1f}" y="6" width="{pw:.1f}" height="20" fill="none" '
                  'stroke="#8a7d6d"/>')
 
     # Ends first, then the physical zero — where impossible values stop matters
@@ -299,21 +307,24 @@ def colorbar_svg(vmin: float, vmax: float, width: int = 280, height: int = 46,
     # its label would collide with one already placed, judged from the label's own
     # width (monospace at font-size 10 is about 6 px per character).
     def half_label(v: float) -> float:
-        return 3.0 * len(format_level(v))
+        return 3.6 * len(format_level(v))     # monospace at font-size 12
 
     ticks: list[float] = []
     for v in [lo, hi] + ([0.0] if lo < 0 < hi else []) + [lo + span / 2]:
         if all(abs(sx(v) - sx(k)) > half_label(v) + half_label(k) + 4 for k in ticks):
             ticks.append(v)
 
-    fs = 'font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6B5D4F"'
+    # 12 in an 820-wide viewBox is ~1.5% of the width, which lands on the report
+    # caption's own apparent size. Absolute sizes mean nothing here: the SVG is
+    # stretched to the figure width, so only the ratio to the viewBox survives.
+    fs = 'font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#6B5D4F"'
     for v in ticks:
         anchor = "start" if v == lo else "end" if v == hi else "middle"
         tx = x0 if v == lo else (x0 + pw if v == hi else sx(v))
-        parts.append(f'<line x1="{sx(v):.1f}" y1="17" x2="{sx(v):.1f}" y2="21" stroke="#6B5D4F"/>')
-        parts.append(f'<text x="{tx:.1f}" y="31" text-anchor="{anchor}" {fs}>'
+        parts.append(f'<line x1="{sx(v):.1f}" y1="26" x2="{sx(v):.1f}" y2="31" stroke="#6B5D4F"/>')
+        parts.append(f'<text x="{tx:.1f}" y="43" text-anchor="{anchor}" {fs}>'
                      f'{format_level(v)}</text>')
-    parts.append(f'<text x="{width / 2:.0f}" y="43" text-anchor="middle" {fs}>{_esc(label)}</text>')
+    parts.append(f'<text x="{width / 2:.0f}" y="57" text-anchor="middle" {fs}>{_esc(label)}</text>')
     parts.append("</svg>")
     return "".join(parts)
 

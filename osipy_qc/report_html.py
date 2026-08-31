@@ -45,7 +45,12 @@ _OVERALL_GLOSS = {
     "UNKNOWN": "Not enough was provided to reach a verdict.",
 }
 
+# Stream B grades the produced perfusion map, Stream A the acquisition it came
+# from. The map is called something different in each organ, so the heading is
+# too - a placenta report headed "The CBF map" names a quantity it never had.
 _STREAM_TITLES = {"B": "The CBF map", "A": "The raw acquisition", "?": "Other"}
+_STREAM_B_TITLE = {"brain": "The CBF map", "kidney": "The RBF map",
+                   "placenta": "The perfusion map"}
 
 _REPORT_CSS = """
 .wrap{max-width:1080px;margin:0 auto;padding:0 1.5rem}
@@ -346,14 +351,25 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
     try:
         window = mosaic_window(cbf)
         lo, hi = window
+        # Organ-aware, and it does NOT claim an orientation. The mosaic slices
+        # the axis it resolved from the voxel sizes, which is the slice-encoding
+        # direction in real data but is not necessarily "axial" - and a placenta
+        # map is not a "CBF map".
+        organ = getattr(cfg, "organ", "brain")
+        map_name = {"brain": "CBF map", "kidney": "RBF map",
+                    "placenta": "Perfusion map"}.get(organ, "Perfusion map")
+        quantity = {"brain": "CBF", "kidney": "RBF",
+                    "placenta": "perfusion"}.get(organ, "perfusion")
         figs.append(
-            '<figure><img alt="Axial CBF slices; dark to bright yellow is low to high CBF, '
-            'cyan is negative CBF" '
+            f'<figure><img alt="{map_name}: evenly spaced slices, dark violet to bright yellow '
+            'is low to high, cyan is negative" '
             'src="' + png_data_uri(slice_mosaic(cbf, vmin=lo, vmax=hi)) + '">'
             + colorbar_svg(lo, hi) +
-            '<figcaption>CBF map &mdash; evenly spaced axial slices; dark is low perfusion, '
-            f'bright yellow is high. Voxels below zero are painted cyan ({negative_colour()}): '
-            'negative CBF is non-physical, so it marks noise or a subtraction artefact. '
+            f'<figcaption>{map_name} &mdash; evenly spaced slices through the imaged volume. '
+            'Three things look different on purpose: <b>black</b> is outside the imaged organ '
+            '(no data), the ramp&rsquo;s <b>dark violet</b> is the lowest measured value, and '
+            f'<b>cyan ({negative_colour()})</b> marks voxels below zero &mdash; negative '
+            f'{quantity} is non-physical, so it marks noise or a subtraction artefact. '
             f'The window is autoscaled to this scan ({format_level(lo)}&ndash;{format_level(hi)} '
             f'{CBF_UNITS}, the 2nd&ndash;98th percentile of its non-zero voxels), so the colours '
             'are not comparable with another scan&rsquo;s.</figcaption></figure>'
@@ -491,7 +507,7 @@ def _check_card(res: dict) -> str:
     )
 
 
-def _checks_grouped(report, d: dict) -> str:
+def _checks_grouped(report, d: dict, organ: str = "brain") -> str:
     from .core.registry import all_checks
 
     streams = {name: entry.get("stream") or "?" for name, entry in all_checks().items()}
@@ -502,7 +518,8 @@ def _checks_grouped(report, d: dict) -> str:
 
     out = []
     for stream in sorted(buckets, key=lambda s: order.get(s, 9)):
-        title = _STREAM_TITLES.get(stream, "Other")
+        title = (_STREAM_B_TITLE.get(organ, "The perfusion map") if stream == "B"
+                 else _STREAM_TITLES.get(stream, "Other"))
         # worst-first within each stream, so failing checks lead (triage order)
         ordered = sorted(buckets[stream], key=lambda r: _SEV.get(r["verdict"], 9))
         cards = "".join(_check_card(r) for r in ordered)
@@ -540,7 +557,7 @@ def report_body(report, inputs: dict | None = None, cfg: QCConfig | None = None,
         f'{_hero(d, cfg, served)}'
         f'{_kpi_tiles(_by_name(d), cfg)}'
         f'{_acq_panel(cfg)}'
-        f'{_checks_grouped(report, d)}'
+        f'{_checks_grouped(report, d, getattr(cfg, "organ", "brain"))}'
         f'{_figures(inputs, cfg)}'
         f'{note}'
     )

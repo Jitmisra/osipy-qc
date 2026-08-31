@@ -488,3 +488,37 @@ def test_the_figure_is_named_for_its_organ():
         figs = _figure_list({"cbf": c.rbf}, QCConfig(organ=organ))
         assert figs[0]["title"] == title
         assert "axial" not in figs[0]["caption"]   # an orientation we never measured
+
+
+def test_the_colour_bar_text_is_not_blown_up_by_the_stretch():
+    """The report stretches this SVG to the figure width, so everything inside
+    scales by that ratio. At the old 280 px viewBox a font-size of 10 came out
+    about six times the caption beneath it, with a colour bar taller than the
+    thing it explained. Text size here is a FRACTION of the viewBox."""
+    import re
+    from osipy_qc.utils.imaging import colorbar_svg
+    svg = colorbar_svg(110.0, 313.0)
+    width = int(re.search(r'width="(\d+)"', svg).group(1))
+    size = int(re.search(r'font-size="(\d+)"', svg).group(1))
+    ratio = size / width
+    # the report caption is 0.78rem in a ~900 px figure, about 1.4%
+    assert 0.010 < ratio < 0.020, f"tick text is {ratio:.1%} of the bar width"
+    # and the bar must be wide relative to its height, or it dominates the figure
+    height = int(re.search(r'height="(\d+)"', svg).group(1))
+    assert width / height > 10
+
+
+def test_the_report_names_the_map_after_its_organ():
+    """A placenta report headed 'The CBF map', over a figure captioned 'CBF map -
+    evenly spaced axial slices', names a quantity and an orientation it never
+    had."""
+    from osipy_qc.report_html import render_html
+    for organ, section, title in (("brain", "The CBF map", "CBF map"),
+                                  ("kidney", "The RBF map", "RBF map"),
+                                  ("placenta", "The perfusion map", "Perfusion map")):
+        cfg = QCConfig(organ=organ)
+        c = synthetic_kidney_case(quality="clean", seed=0)
+        html = render_html(run_qc({}, cfg=cfg), inputs={"cbf": c.rbf}, cfg=cfg)
+        assert f"Checks &mdash; {section}" in html, organ
+        assert title in html, organ
+        assert "axial" not in html.lower(), organ
