@@ -91,12 +91,23 @@ def coverage_check(cbf=None, gm=None, wm=None, cfg: QCConfig = QCConfig(), **_) 
     if wm is not None:
         wm_cov = coverage_fraction(cbf, wm, cfg.tissue_thresh)
         metric["wm_coverage"] = round(wm_cov, 4)
-        if wm_cov < worst:
+        # NaN comparisons are always False, so an empty WM mask must not silently
+        # win "worst"; prefer a measurable fraction over an unmeasurable one
+        if np.isfinite(wm_cov) and (not np.isfinite(worst) or wm_cov < worst):
             worst, worst_name = wm_cov, "WM"
 
-    if worst == 0.0:
+    if not np.isfinite(worst):
         return CheckResult("4.2.coverage", Verdict.UNKNOWN, metric=metric,
-                           reason="empty tissue mask - cannot assess coverage")
+                           reason="the tissue mask is empty - there is no ROI whose coverage "
+                                  "could be measured")
+    if worst == 0.0:
+        # The failure this check exists for: the ROI is real and the CBF map
+        # reaches none of it. Every level number computed over that ROI would be
+        # an average of structural zeros.
+        return CheckResult("4.2.coverage", Verdict.FAIL, metric=metric,
+                           reason=f"the CBF map covers NONE of the {worst_name} ROI - the two "
+                                  "images do not overlap, so every level and ratio computed "
+                                  "over it would be an average of zeros")
     metric["provenance"] = "uncalibrated - our defence against T1/ASL FOV mismatch"
 
     if worst >= cfg.coverage_warn:

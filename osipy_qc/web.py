@@ -1144,6 +1144,19 @@ def _safe_back(raw: str) -> str:
     return raw
 
 
+def _client_safe(exc: BaseException) -> str:
+    """An exception message with server filesystem paths removed.
+
+    Errors are rendered into a page the uploader sees, and library exceptions
+    routinely embed absolute paths - nibabel names the temp file it could not
+    read, which discloses the server's directory layout and the request's
+    scratch directory to anyone who uploads a malformed file. The unredacted
+    text still reaches the server log, where it belongs.
+    """
+    text = f"{type(exc).__name__}: {exc}"
+    return re.sub(r"(?:/[^/\s'\"]+)+/([^/\s'\"]+)", r"\1", text)
+
+
 def _error_page(code: int, msg: str) -> str:
     """A styled, self-contained error page (charset + head), not a bare <h1>."""
     return (
@@ -1396,7 +1409,11 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
                 self._send(_error_page(404, "That page does not exist."), 404)
         except Exception as exc:            # a render error must not leak a traceback
             traceback.print_exc()
-            self._send(_error_page(500, f"{type(exc).__name__}: {exc}"), 500)
+            # The message is shown to the CLIENT, and library exceptions carry
+            # absolute server paths - nibabel's ImageFileError names the temp
+            # file it failed on. The full text still goes to the server log.
+            traceback.print_exc()
+            self._send(_error_page(500, _client_safe(exc)), 500)
 
     def do_POST(self):
         if not self._host_ok():

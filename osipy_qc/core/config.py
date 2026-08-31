@@ -13,7 +13,8 @@ So every threshold below is tagged with where it actually came from:
     PUBLISHED       a peer-reviewed paper states this number for this purpose.
     IMPLEMENTATION  a reference implementation uses it (code, not a paper).
     UNCALIBRATED    our engineering default. NOT yet calibrated against rater
-                    labels. These must not drive a FAIL on their own.
+                    labels. A FAIL decided by one of these is marked
+                    `provisional`, and strict=False demotes it to a WARN.
 
 `THRESHOLD_PROVENANCE` below is the machine-readable source of truth, and is
 what the report prints next to each number. If you cannot cite it, say so here
@@ -47,8 +48,8 @@ class Provenance(str, Enum):
 class QCConfig:
     # ---- context -----------------------------------------------------------
     population: str = "adult"       # see for_population(): "adult" | "neonate"
-    organ: str = "brain"            # brain | kidney (kidney profile is a stub, see ORGANS)
-    strict: bool = True             # False -> demote uncalibrated FAILs to WARN (clinical cohorts)
+    organ: str = "brain"            # brain | kidney | placenta - each has its own checks
+    strict: bool = True             # False -> demote PROVISIONAL FAILs to WARN (clinical cohorts)
 
     # ---- QEI (Module 1) ----------------------------------------------------
     qei_warn: float = 0.50          # PUBLISHED - Dolui 2024
@@ -518,6 +519,156 @@ THRESHOLD_PROVENANCE: dict[str, tuple[Provenance, str, str]] = {
         Provenance.IMPLEMENTATION,
         'gestational plausibility',
         'A stated GA outside 10-42 weeks is a data-entry error, not a physiological finding. Perfusion changes across gestation, so a verdict without GA is not interpretable.',
+    ),
+    "brain_cbf_absurd_lo": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'A negative whole-brain mean is non-physical, so the bound is the sign; 0.0 is not a fitted number.',
+    ),
+    "brain_cbf_absurd_hi": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "About 3x the top of the published GM band (100, White Paper p.17). It encodes 'this cannot be a quantified CBF map at all', which is the only claim a self-derived brain mask supports - NOT what healthy CBF looks like, which check 3.1 does from published bands.",
+    ),
+    "brain_mask_percentile": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Exposed because it MOVES the reported mean substantially - 41 to 60 on synthetic data across the 25th-75th percentile - which is precisely why check 3.5 does not grade that mean against a normal band.',
+    ),
+    "kidney_min_roi_voxels": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Below about 20 voxels an ROI mean is dominated by partial-volume mixing rather than by the tissue.',
+    ),
+    "kidney_min_medulla_voxels": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        "The medulla is the smaller compartment, so its floor is lower than the cortex's.",
+    ),
+    "kidney_min_repetitions": (
+        Provenance.IMPLEMENTATION,
+        'statistical definition',
+        'A sample SD over repetitions needs at least 3 points to mean anything. Not a quality bound.',
+    ),
+    "kidney_min_slice_voxels": (
+        Provenance.IMPLEMENTATION,
+        'construction of the slice statistic',
+        'A slice holding fewer than this much mask cannot support a usable/unusable judgement.',
+    ),
+    "kidney_slice_finite_frac": (
+        Provenance.IMPLEMENTATION,
+        'construction of the slice statistic',
+        "The share of a slice's mask voxels that must be finite and non-zero for the slice to count as usable.",
+    ),
+    "kidney_slice_usable_warn": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Twin of kidney_slice_usable_pass. No published usable-slice fraction exists for renal ASL.',
+    ),
+    "kidney_min_surviving_pairs": (
+        Provenance.IMPLEMENTATION,
+        'definition',
+        'Fewer than two surviving pairs leaves nothing to average; this is arithmetic, not a threshold.',
+    ),
+    "placenta_iqr_multiplier": (
+        Provenance.IMPLEMENTATION,
+        'Tukey fence, widened',
+        "The usual Tukey outlier fence is 1.5xIQR; widened to 3 because no published placental ceiling exists and the fence asks only 'is this voxel extreme even for THIS placenta'.",
+    ),
+    "placenta_min_roi_voxels": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Below this the fractions are dominated by counting noise rather than by the map.',
+    ),
+    "placenta_min_segments": (
+        Provenance.IMPLEMENTATION,
+        'construction of the segment statistic',
+        'A spread over fewer than 20 segment means is not a dispersion measure.',
+    ),
+    "placenta_segment_size": (
+        Provenance.IMPLEMENTATION,
+        'placental heterogeneity practice',
+        '3x3 in-plane, non-overlapping, complete segments only - the segmentation the heterogeneity measure is defined on.',
+    ),
+    "placenta_holes_frac_warn": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Enclosed background inside a placental mask is a segmentation artefact; how much is tolerable is not published.',
+    ),
+    "placenta_edge_voxel_frac": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Share of the mask sitting on a slab face. Published placental slabs are about 57 mm or 8 slices and a placenta routinely exceeds that, so clipping is common - the number is an engineering line.',
+    ),
+    "placenta_covered_frac": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'Share of an anatomical placenta the imaging slab must contain. No published requirement exists.',
+    ),
+    "placenta_ga_max_wk": (
+        Provenance.IMPLEMENTATION,
+        'the gestational range the placental ASL literature actually studies',
+        'Twin of placenta_ga_min_wk: outside 14-41 weeks a stated GA is a data-entry error rather than a physiological finding.',
+    ),
+    "placenta_outlier_voxel_frac": (
+        Provenance.IMPLEMENTATION,
+        'per-pair subtraction rejection practice',
+        'The voxel-fraction half of the published rejection rule, mirroring the renal one.',
+    ),
+    "placenta_rejected_frac_warn": (
+        Provenance.IMPLEMENTATION,
+        'placental ASL rejection practice',
+        'The rejected-pair fraction reported in placental ASL work. The RULE is published; that this fraction should raise a warning is our reading.',
+    ),
+    "placenta_rejected_frac_severe": (
+        Provenance.IMPLEMENTATION,
+        'placental ASL rejection practice',
+        'The upper reported rejection fraction, used only to word the reason more strongly.',
+    ),
+    "placenta_min_surviving_pairs": (
+        Provenance.IMPLEMENTATION,
+        'definition',
+        'An average over fewer than four subtractions is dominated by whichever pairs survived.',
+    ),
+    "placenta_good_surviving_pairs": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'How many surviving pairs is comfortable, as opposed to merely possible.',
+    ),
+    "placenta_tsd_warn_pct": (
+        Provenance.IMPLEMENTATION,
+        'the reference placental cohort (6.7 +/- 3.1%)',
+        'One SD above the reference mean. Applied ONLY when the acquisition is cohort-comparable (VSASL at 3 T), which is the only setting the reference was measured in.',
+    ),
+    "placenta_ncc_pass": (
+        Provenance.IMPLEMENTATION,
+        'DSVR registration practice',
+        'Global normalised cross-correlation floor used in placental deformable-registration work.',
+    ),
+    "placenta_ssim_pass": (
+        Provenance.IMPLEMENTATION,
+        'DSVR registration practice',
+        'Local SSIM floor, paired with the NCC one. NCC is global and stays high while a region is locally deformed, which is exactly what a contraction does.',
+    ),
+    "placenta_ssim_kernel_mm": (
+        Provenance.IMPLEMENTATION,
+        'DSVR registration practice',
+        'The local SSIM window. At the 3-4 mm resolution placental ASL is acquired at this is a box of about 7 voxels.',
+    ),
+    "placenta_bad_volume_frac": (
+        Provenance.UNCALIBRATED,
+        'NONE',
+        'What share of volumes may fall below the similarity floors before it is worth reporting.',
+    ),
+    "placenta_contraction_drop": (
+        Provenance.IMPLEMENTATION,
+        'contraction detection practice',
+        'A drop of more than 10% in occupied area below baseline. Paired in code with a robust MAD noise floor, without which a proportion over a few hundred voxels crosses this line on noise alone.',
+    ),
+    "placenta_min_volumes_contraction": (
+        Provenance.IMPLEMENTATION,
+        'definition',
+        'A baseline and a departure from it need at least five volumes.',
     ),
 }
 

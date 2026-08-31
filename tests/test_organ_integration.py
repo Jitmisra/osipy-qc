@@ -578,9 +578,12 @@ def test_the_provenance_counts_in_the_docs_are_current():
     for _k, (level, _c, _n) in THRESHOLD_PROVENANCE.items():
         counts[level.value] = counts.get(level.value, 0) + 1
     assert len(uncalibrated_fields()) == counts["uncalibrated"]
-    readme = (pathlib.Path(__file__).resolve().parent.parent / "README.md").read_text()
+    # THRESHOLD_PROVENANCE.md is generated, so IT is where the tallies must be
+    # current; the README quotes them in prose and is checked by the generator's
+    # own --check mode rather than by string matching here.
+    doc = (pathlib.Path(__file__).resolve().parent.parent / "THRESHOLD_PROVENANCE.md").read_text()
     for level in ("published", "implementation", "uncalibrated"):
-        assert f"({counts[level]}" in readme or f"**{counts[level]}" in readme, level
+        assert f"{level} | {counts[level]} " in doc, level
 
 
 def test_a_single_volume_in_a_4d_container_is_graded_not_rejected():
@@ -646,3 +649,72 @@ def test_a_folder_with_data_still_grades_normally():
     ids = {r.check: r.verdict.value for r in rep.results}
     assert ids["5.1.schema"] == "WARN"          # genuinely no sidecar
     assert ids["6.1.m0_present"] == "WARN"      # genuinely no M0
+
+
+def test_a_total_fov_mismatch_fails_rather_than_reporting_an_empty_mask():
+    """coverage_fraction returned 0.0 both for an empty ROI and for an ROI the
+    CBF map reaches none of, so 4.2 reported a TOTAL FOV mismatch - the one
+    failure it exists to catch - as "empty tissue mask, cannot assess coverage".
+    Wrong verdict, and a false statement about the mask."""
+    from osipy_qc.checks.coreg import coverage_check
+    full_gm = np.full((10, 10, 10), 0.9)
+
+    no_overlap = coverage_check(cbf=np.zeros((10, 10, 10)), gm=full_gm, cfg=QCConfig())
+    assert no_overlap.verdict.value == "FAIL"
+    assert "covers NONE" in no_overlap.reason
+
+    empty_roi = coverage_check(cbf=np.ones((10, 10, 10)), gm=np.zeros((10, 10, 10)),
+                               cfg=QCConfig())
+    assert empty_roi.verdict.value == "UNKNOWN"
+    assert "mask is empty" in empty_roi.reason
+
+
+def test_a_non_positive_m0_tr_is_refused_not_corrected():
+    """1/(1 - exp(-TR/T1)) is infinite at TR=0 and negative below it, so a bad
+    value produced a confident "correct by xinf"."""
+    from osipy_qc.checks.m0 import m0_tr_check
+    for bad in (0.0, -3.0):
+        r = m0_tr_check(m0_tr_s=bad)
+        assert r.verdict.value == "UNKNOWN"
+        assert "not a repetition time" in r.reason
+    assert m0_tr_check(m0_tr_s=6.0).verdict.value == "PASS"
+
+
+def test_a_4d_singleton_mask_does_not_crash_the_kidney_checks():
+    """(X, Y, Z, 1) is a legal mask shape that segmentation tools emit. Five
+    checks reported "check error: operands could not be broadcast" about it."""
+    from osipy_qc.synth import synthetic_kidney_case
+    c = synthetic_kidney_case(quality="clean", seed=0)
+    fourd = {s: m[..., None] for s, m in c.cortex_masks.items()}
+    rep = run_qc(dict(rbf_map=c.rbf, cortex_masks=fourd, units="mL/100g/min"),
+                 cfg=QCConfig(organ="kidney"))
+    assert not [r for r in rep.results if "check error" in r.reason]
+    lvl = next(r for r in rep.results if r.check == "k3.1.cortical_rbf")
+    assert "300" in lvl.reason
+
+
+# --------------------------------------------------------------------------- #
+# deployment posture
+# --------------------------------------------------------------------------- #
+def test_binding_off_loopback_must_be_explicit():
+    """--host defaulted from a HOST environment variable. A stray HOST in the
+    shell moved the server off loopback, and _host_ok stops enforcing its
+    DNS-rebinding check the moment the bind address is not loopback - so an
+    ambient variable silently downgraded the security posture."""
+    import osipy_qc.cli as cli
+    src = open(cli.__file__).read()
+    assert 'os.environ.get("HOST"' not in src
+    assert 'default="127.0.0.1"' in src
+
+
+def test_error_pages_do_not_disclose_server_paths():
+    """Library exceptions embed absolute paths - nibabel names the temp file it
+    could not read - and the message is rendered into a page the uploader sees."""
+    from osipy_qc.web import _client_safe
+    msg = _client_safe(Exception(
+        "File /var/folders/px/T/osipy_qc_ab12/raw/x.nii.gz is not a gzip file"))
+    assert "/var/folders" not in msg and "osipy_qc_ab12" not in msg
+    assert "x.nii.gz" in msg          # the useful part survives
+    # a message with no path is left alone
+    plain = _client_safe(ValueError("mask shape (4,4,4) != volume shape (8,8,4)"))
+    assert "(4,4,4)" in plain

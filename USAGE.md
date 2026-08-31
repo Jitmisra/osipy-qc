@@ -153,7 +153,7 @@ once their bands are calibrated with the mentors (see the population table in [T
 from osipy_qc.core.config import provenance_of, uncalibrated_fields
 
 provenance_of("gm_cbf_lo")   # (PUBLISHED, 'Alsop 2015 ... doi:10.1002/mrm.25197', 'verbatim: "40-100 ..."')
-uncalibrated_fields()        # the 32 numbers we cannot cite
+uncalibrated_fields()        # the 44 numbers we cannot cite
 ```
 Every threshold is tagged **published** (a paper states it), **implementation**
 (reference code uses it), or **uncalibrated** (our engineering default).

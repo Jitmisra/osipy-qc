@@ -42,6 +42,12 @@ def m0_tr_check(m0_tr_s: float | None = None, cfg: QCConfig = QCConfig(), **_) -
     T1-correction factor 1/(1 - exp(-TR/T1)); never a hard fail."""
     if m0_tr_s is None:
         return CheckResult("6.2.m0_tr", Verdict.UNKNOWN, reason="M0 TR unknown")
+    if not (m0_tr_s > 0) or not np.isfinite(m0_tr_s):
+        # 1/(1 - exp(-TR/T1)) is infinite at TR=0 and negative below it, so a bad
+        # value produced a confident "correct by xinf" instead of a refusal
+        return CheckResult("6.2.m0_tr", Verdict.UNKNOWN, metric={"tr_seconds": m0_tr_s},
+                           reason=f"M0 TR is {m0_tr_s}, which is not a repetition time - "
+                                  "no relaxation correction can be derived from it")
     if m0_tr_s >= cfg.m0_tr_min_s:
         return CheckResult("6.2.m0_tr", Verdict.PASS,
                            metric={"tr_seconds": m0_tr_s, "correction_factor": 1.0},

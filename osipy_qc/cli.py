@@ -133,7 +133,13 @@ def main(argv=None) -> int:
                     help="cohort dashboard populated with a synthetic demo cohort")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)),
                     help="port for the web UI (default 8000, or $PORT)")
-    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),
+    # Deliberately NOT defaulted from a HOST environment variable. A stray HOST
+    # in the shell would have moved the server off loopback, and _host_ok stops
+    # enforcing its DNS-rebinding check the moment the bind address is not
+    # loopback - so an ambient variable silently downgraded the security posture.
+    # Binding publicly must be an explicit act: render.yaml already passes
+    # --host 0.0.0.0 on the command line.
+    ap.add_argument("--host", default="127.0.0.1",
                     help="interface to bind (default 127.0.0.1; use 0.0.0.0 to accept "
                          "traffic from outside this machine)")
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser window")

@@ -66,12 +66,17 @@ def coverage_fraction(cbf: np.ndarray, prob: np.ndarray, thresh: float = 0.7) ->
 
     1.0 = every tissue voxel has data. 0.8 = a fifth of the ROI sits outside the
     ASL FOV (or is otherwise zero) and would have been averaged in as zeros.
-    Returns 0.0 for an empty ROI.
+
+    Returns **NaN** for an empty ROI, and 0.0 when the ROI exists but the CBF map
+    covers none of it. Collapsing both to 0.0 made the coverage check report a
+    TOTAL FOV mismatch - the one failure it exists to catch - as "empty tissue
+    mask, cannot assess coverage", which is both the wrong verdict and a false
+    statement about the mask.
     """
     tissue = threshold_prob(prob, thresh)
     n_tissue = int(np.count_nonzero(tissue))
     if n_tissue == 0:
-        return 0.0
+        return float("nan")
     n_covered = int(np.count_nonzero(tissue & (clean_nonfinite(cbf) != 0.0)))
     return n_covered / n_tissue
 

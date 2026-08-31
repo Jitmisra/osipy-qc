@@ -274,7 +274,7 @@ Overall = **any FAIL → FAIL**, else **any WARN/UNKNOWN → WARN**, else **PASS
 Most of this field has **no published PASS/FAIL cutoffs** — ASLPrep, ExploreASL,
 MRIQC and fMRIPrep all report metrics and ship *zero* verdict logic. So rather than
 dress up guesses as evidence, each threshold is tagged **published** (12, each with
-a DOI), **implementation** (16), or **uncalibrated** (32, honestly declared).
+a DOI), **implementation** (34), or **uncalibrated** (44, honestly declared).
 
 A FAIL decided by an uncalibrated cut-off is marked **provisional** in the report.
 `--no-strict` (or `QCConfig(strict=False)`) demotes every provisional FAIL to a WARN,

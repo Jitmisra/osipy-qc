@@ -80,7 +80,9 @@ def _grid_error(volume, mask) -> str | None:
     """Actionable message when the mask is not on the image grid."""
     if mask is None:
         return None
-    a, m = np.asarray(volume).shape[:3], np.asarray(mask).shape[:3]
+    from ..utils.masks import as_3d
+    a = as_3d(np.asarray(volume)).shape[:3]
+    m = as_3d(np.asarray(mask)).shape[:3]
     if a != m:
         return (f"the placenta mask is {tuple(m)} but the image is {tuple(a)} - resample the "
                 "mask into the image grid before grading (this tool deliberately does not "

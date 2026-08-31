@@ -45,6 +45,7 @@ import numpy as np
 from ..core.config import QCConfig
 from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
+from ..utils.masks import as_3d
 from ..utils.roi import (SIDES, as_mask, as_sides, asymmetry_index,
                          component_sizes, largest_component_fraction, roi_stats,
                          roi_values, touches_fov_edge)
@@ -143,10 +144,13 @@ def _grid_error(volume, *mask_dicts) -> str | None:
     edge case: the renaldro/iBEAt cortex-medulla labels ship at 1 mm on a 512^2
     grid while the ASL sits at 4.69 mm on a 64x32 grid.
     """
-    shape = np.asarray(volume).shape[:3]
+    shape = as_3d(np.asarray(volume)).shape[:3]
     for masks in mask_dicts:
         for side, mask in as_sides(masks).items():
-            m = np.asarray(mask)
+            # compare the SQUEEZED shape, which is what as_mask will hand the
+            # check; comparing shape[:3] passed a (X,Y,Z,1) mask through here and
+            # then let it fail deep inside numpy instead
+            m = as_3d(np.asarray(mask))
             if m.shape[:3] != shape:
                 return (f"the {side} mask is {tuple(m.shape[:3])} but the image is "
                         f"{tuple(shape)} - resample the masks into the image grid before "
@@ -1165,6 +1169,9 @@ def kidney_swap_check(asl_4d=None, kidney_masks=None, background_suppression=Non
     masks = as_sides(kidney_masks)
     if not masks:
         return CheckResult("k5.3.swap", Verdict.UNKNOWN, reason="needs a kidney mask")
+    bad = _grid_error(arr[..., 0], kidney_masks)
+    if bad:
+        return CheckResult("k5.3.swap", Verdict.UNKNOWN, reason=bad)
 
     roi = np.zeros(arr.shape[:3], dtype=bool)
     for m in masks.values():
@@ -1320,6 +1327,9 @@ def kidney_m0_tr_check(m0_tr_s=None, field_T=None, t1_map=None, cortex_masks=Non
     t1_source = ("wolf2018 range midpoint, "
                  f"{'3T' if (field_T or 3) >= 2.5 else '1.5T'}")
     if t1_map is not None:
+        bad = _grid_error(t1_map, cortex_masks, medulla_masks)
+        if bad:
+            return CheckResult("k6.3.m0_tr", Verdict.UNKNOWN, reason=bad)
         for name, masks in (("cortex", as_sides(cortex_masks)),
                             ("medulla", as_sides(medulla_masks))):
             vals = [roi_stats(t1_map, m)["mean"] for m in masks.values()]

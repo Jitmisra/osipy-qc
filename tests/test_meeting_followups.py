@@ -80,7 +80,13 @@ def test_coverage_helpers():
     assert abs(coverage_fraction(cbf, gm) - 0.7) < 1e-6
     assert int(np.count_nonzero(covered_tissue_mask(cbf, gm))) == 70
     # empty ROI must not divide by zero
-    assert coverage_fraction(cbf, np.zeros_like(gm)) == 0.0
+    # An empty ROI is NaN, not 0.0. Collapsing both to 0.0 made the coverage
+    # check report a total FOV mismatch - the failure it exists to catch - as
+    # "empty tissue mask", which was the wrong verdict AND a false statement
+    # about the mask.
+    assert np.isnan(coverage_fraction(cbf, np.zeros_like(gm)))
+    # a real ROI the CBF map reaches none of is 0.0, and is a finding
+    assert coverage_fraction(np.zeros_like(cbf), gm) == 0.0
 
 
 # --------------------------------------------------------------------------- #

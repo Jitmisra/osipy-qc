@@ -46,6 +46,11 @@ def as_mask(mask: Any, thresh: float = 0.5) -> np.ndarray:
     choice, not a published one.
     """
     arr = np.asarray(mask)
+    # A mask written as (X, Y, Z, 1) is a 3-D mask. NIfTI permits the shape and
+    # segmentation tools emit it; rejecting it made five kidney checks report
+    # "check error: operands could not be broadcast" about an ordinary file.
+    while arr.ndim == 4 and arr.shape[3] == 1:
+        arr = arr[..., 0]
     if arr.dtype == bool:
         return arr
     arr = arr.astype(float)

@@ -15,8 +15,8 @@ than hidden in a docstring.
 | tier | count | may decide a FAIL alone? |
 |---|---:|---|
 | 📄 published | 12 | yes |
-| 💻 implementation | 16 | yes, and it is recorded |
-| 🔧 uncalibrated | 32 | only as a *provisional* FAIL, which `--no-strict` demotes |
+| 💻 implementation | 34 | yes, and it is recorded |
+| 🔧 uncalibrated | 44 | only as a *provisional* FAIL, which `--no-strict` demotes |
 
 > **What `provisional` means.** A FAIL decided by an uncalibrated cut-off is
 > flagged in the report and demoted to a WARN by `--no-strict`. On a deliberately
@@ -51,11 +51,29 @@ A reference implementation uses this value - code, not a paper. Reproducible and
 |---|---|---|---|
 | `kidney_implausible_ceiling` | `500` | one study's segmentation preprocessing clip | A per-voxel preprocessing clip inside one study's segmentation step, not a validated scan-level quality bound. Context only: whole-kidney flow ~1200 mL/min is about 400 mL/100g/min for a 300 g kidney - which makes 500 plausible as an impossibility line, not as a normal bound. |
 | `kidney_mask_component_frac` | `0.95` | geometric definition | A kidney is one connected object; a mask that is 95% one component and 5% scattered elsewhere has stray voxels. This is a shape fact, not a quality threshold. |
+| `kidney_min_repetitions` | `3` | statistical definition | A sample SD over repetitions needs at least 3 points to mean anything. Not a quality bound. |
+| `kidney_min_slice_voxels` | `20` | construction of the slice statistic | A slice holding fewer than this much mask cannot support a usable/unusable judgement. |
+| `kidney_min_surviving_pairs` | `2` | definition | Fewer than two surviving pairs leaves nothing to average; this is arithmetic, not a threshold. |
 | `kidney_outlier_sd` | `2` | Harteveld et al., renal ASL outlier rejection | 'Reject the pair if more than 20% of kidney voxels deviate more than +/-2 SD.' Three further published variants exist (Bones' 80%-within-2SD, Harteveld's paediatric 1.5 SD, Garcia-Ruiz's 2SD-plus-RMSE); this is the default, and the rule used is named in the metric so a report never hides which one produced the count. |
 | `kidney_outlier_voxel_frac` | `0.2` | Harteveld et al., renal ASL outlier rejection | The '20% of voxels' half of the same published rule. |
+| `kidney_slice_finite_frac` | `0.9` | construction of the slice statistic | The share of a slice's mask voxels that must be finite and non-zero for the slice to count as usable. |
+| `placenta_contraction_drop` | `0.1` | contraction detection practice | A drop of more than 10% in occupied area below baseline. Paired in code with a robust MAD noise floor, without which a proportion over a few hundred voxels crosses this line on noise alone. |
+| `placenta_ga_max_wk` | `41` | the gestational range the placental ASL literature actually studies | Twin of placenta_ga_min_wk: outside 14-41 weeks a stated GA is a data-entry error rather than a physiological finding. |
 | `placenta_ga_min_wk` | `14` | gestational plausibility | A stated GA outside 10-42 weeks is a data-entry error, not a physiological finding. Perfusion changes across gestation, so a verdict without GA is not interpretable. |
+| `placenta_iqr_multiplier` | `3` | Tukey fence, widened | The usual Tukey outlier fence is 1.5xIQR; widened to 3 because no published placental ceiling exists and the fence asks only 'is this voxel extreme even for THIS placenta'. |
 | `placenta_mask_component_frac` | `0.95` | geometric definition | The placenta is one organ; a mask in many pieces is a segmentation failure. Slightly looser than the kidney's 0.95 because a placental mask legitimately thins at its edges. |
+| `placenta_min_segments` | `20` | construction of the segment statistic | A spread over fewer than 20 segment means is not a dispersion measure. |
+| `placenta_min_surviving_pairs` | `4` | definition | An average over fewer than four subtractions is dominated by whichever pairs survived. |
+| `placenta_min_volumes_contraction` | `5` | definition | A baseline and a departure from it need at least five volumes. |
+| `placenta_ncc_pass` | `0.75` | DSVR registration practice | Global normalised cross-correlation floor used in placental deformable-registration work. |
 | `placenta_outlier_sd` | `1.5` | placental ASL practice (per-pair subtraction rejection) | The one implementable published rule family for placenta, mirroring the renal rule. |
+| `placenta_outlier_voxel_frac` | `0.2` | per-pair subtraction rejection practice | The voxel-fraction half of the published rejection rule, mirroring the renal one. |
+| `placenta_rejected_frac_severe` | `0.269` | placental ASL rejection practice | The upper reported rejection fraction, used only to word the reason more strongly. |
+| `placenta_rejected_frac_warn` | `0.154` | placental ASL rejection practice | The rejected-pair fraction reported in placental ASL work. The RULE is published; that this fraction should raise a warning is our reading. |
+| `placenta_segment_size` | `3` | placental heterogeneity practice | 3x3 in-plane, non-overlapping, complete segments only - the segmentation the heterogeneity measure is defined on. |
+| `placenta_ssim_kernel_mm` | `20` | DSVR registration practice | The local SSIM window. At the 3-4 mm resolution placental ASL is acquired at this is a box of about 7 voxels. |
+| `placenta_ssim_pass` | `0.6` | DSVR registration practice | Local SSIM floor, paired with the NCC one. NCC is global and stays high while a region is locally deformed, which is exactly what a contraction does. |
+| `placenta_tsd_warn_pct` | `9.8` | the reference placental cohort (6.7 +/- 3.1%) | One SD above the reference mean. Applied ONLY when the acquisition is cohort-comparable (VSASL at 3 T), which is the only setting the reference was measured in. |
 | `qei_a` | `3.0126` | aslprep/utils/confounds.py compute_qei | Paper Fig.2 prints 1-exp(-3.0*x^2.4); 3.0126 rounds to 3.0. Consistent. |
 | `qei_b` | `2.4419` | aslprep/utils/confounds.py compute_qei | 2.4419 rounds to the paper's 2.4. Consistent. |
 | `qei_c` | `0.054` | aslprep/utils/confounds.py compute_qei | DISCREPANCY: the paper's Fig.2 prints exp(-0.1*x^0.9). 0.054 rounds to 0.05, not 0.1 - a ~1.85x gap. Every other constant rounds cleanly. Needs the author's ruling. |
@@ -72,6 +90,9 @@ Our engineering default. Not fitted to anything. A FAIL decided by one of these 
 
 | threshold | default | source | what the source actually says |
 |---|---|---|---|
+| `brain_cbf_absurd_hi` | `300` | NONE | About 3x the top of the published GM band (100, White Paper p.17). It encodes 'this cannot be a quantified CBF map at all', which is the only claim a self-derived brain mask supports - NOT what healthy CBF looks like, which check 3.1 does from published bands. |
+| `brain_cbf_absurd_lo` | `0` | NONE | A negative whole-brain mean is non-physical, so the bound is the sign; 0.0 is not a fitted number. |
+| `brain_mask_percentile` | `50` | NONE | Exposed because it MOVES the reported mean substantially - 41 to 60 on synthetic data across the 25th-75th percentile - which is precisely why check 3.5 does not grade that mean against a normal band. |
 | `coverage_fail` | `0.75` | NONE | Our engineering default. |
 | `coverage_warn` | `0.9` | NONE | Our defence against the 'cerebellum outside the ASL FOV' bug. |
 | `deep_gm_ratio_hi` | `2.6` | Derived from Miranda 2006 (as above) | Our extrapolation, not a published cutoff. |
@@ -88,14 +109,23 @@ Our engineering default. Not fitted to anything. A FAIL decided by one of these 
 | `kidney_frac_warn` | `0.05` | NONE | Nobody publishes 'reject the scan if X% of cortical voxels are negative'. Carried over in spirit from the brain module (10%) and TIGHTENED to 5% because renal cortical ROIs are small (a few hundred voxels), so a 5% excursion is a real count, not rounding. |
 | `kidney_max_rejected_pairs` | `2` | NONE | The rejection RULE is published; how many rejections make a scan bad is not. |
 | `kidney_min_cortex_voxels` | `50` | NONE | Below ~50 voxels a cortical mean is dominated by partial-volume mixing with medulla, which biases cortical RBF downward (a fact about voxel size, not data quality). |
+| `kidney_min_medulla_voxels` | `10` | NONE | The medulla is the smaller compartment, so its floor is lower than the cortex's. |
+| `kidney_min_roi_voxels` | `20` | NONE | Below about 20 voxels an ROI mean is dominated by partial-volume mixing rather than by the tissue. |
 | `kidney_pws_hi` | `8` | NONE | Upper edge holds the FAIR-at-optimal-TI peak of 5.98 +/- 0.70% (bones2021) with margin. PWS falls ~3x between PLD 0.5 s and 1.5 s in the same subjects (harteveld2022), so the band is only applied when the PLD/TI is known. |
 | `kidney_pws_lo` | `0.5` | NONE | Band drawn to contain the full published spread, not fitted. Measured cortical PWS is ~2.95-3.09% (garciaruiz2025, n=16); a band anchored on the review's oft-quoted 5% (odudu2018) would be wrong in the common case. |
 | `kidney_rbf_sanity_hi` | `500` | NONE | Deliberately wide upper sanity edge, coinciding with the K2.3 ceiling. No per-scan reference interval exists: the PET reference standard itself disagrees by +/-136 mL/min/100 mL (Olsen 2025), which is why no accuracy-based band is defensible. |
 | `kidney_rbf_sanity_lo` | `50` | NONE | 50 appears in no paper. The band encodes 'this cannot be renal cortical perfusion', not 'this is not healthy perfusion'. Odudu A, et al. Nephrol Dial Transplant 2018;33(suppl_2):ii15-ii21 (renal ASL systematic review) reports a 139-427 spread of study-level cohort MEANS in healthy volunteers and 83-412 in patients - the two overlap almost entirely, so that spread has near-zero discriminative power and is NOT used as a band. |
 | `kidney_slice_usable_pass` | `0.8` | NONE | No published usable-slice fraction exists for renal ASL. 0.8/0.5 are engineering bands. |
+| `kidney_slice_usable_warn` | `0.5` | NONE | Twin of kidney_slice_usable_pass. No published usable-slice fraction exists for renal ASL. |
 | `kidney_through_plane_frac` | `0.25` | NONE | Through-plane motion cannot be corrected by in-plane registration, so its share of the total is reported; 0.25 is an engineering line. |
 | `neg_gm_fail` | `0.2` | NONE | No published cutoff exists. |
 | `neg_gm_warn` | `0.1` | NONE | Dolui 2024 uses negative-GM fraction as a CONTINUOUS QEI term, never a cutoff. |
+| `placenta_bad_volume_frac` | `0.1` | NONE | What share of volumes may fall below the similarity floors before it is worth reporting. |
+| `placenta_covered_frac` | `0.9` | NONE | Share of an anatomical placenta the imaging slab must contain. No published requirement exists. |
+| `placenta_edge_voxel_frac` | `0.02` | NONE | Share of the mask sitting on a slab face. Published placental slabs are about 57 mm or 8 slices and a placenta routinely exceeds that, so clipping is common - the number is an engineering line. |
+| `placenta_good_surviving_pairs` | `8` | NONE | How many surviving pairs is comfortable, as opposed to merely possible. |
+| `placenta_holes_frac_warn` | `0.05` | NONE | Enclosed background inside a placental mask is a segmentation artefact; how much is tolerable is not published. |
+| `placenta_min_roi_voxels` | `50` | NONE | Below this the fractions are dominated by counting noise rather than by the map. |
 | `placenta_neg_frac_warn` | `0.1` | NONE | As for kidney: no published negative-fraction rule exists for any organ. |
 | `placenta_nonfinite_fail` | `0.5` | NONE | Number uncalibrated; the FAIL is licensed by the sign, not by the 20%. |
 | `placenta_upper_frac_warn` | `0.05` | NONE | No placental perfusion ceiling is published. Reported placental values span 176 +/- 91 (Zun, VSASL) to 249-336 across gestation, in units that differ between studies, so the ceiling is a wide impossibility line and the units check (P2.1) gates it. |
@@ -131,14 +161,6 @@ cohorts. The shipped profiles and the fields that differ between them:
 **`kidney`** — Implemented from KIDNEY_QC_DESIGN.md. Renal ASL consensus: Nery F, et al. MAGMA 2020;33(1):141-161. doi:10.1007/s10334-019-00800-z - 59 statements and ZERO numeric quality thresholds, so almost every bound here is UNCALIBRATED. Masks are required inputs: no consensus-endorsed automated cortex/medulla segmentation exists, so the toolbox never derives one.
 
 **`placenta`** — Implemented from PLACENTA_QC_DESIGN.md. There is no placental consensus document at all - Taso 2023 covers the placenta with neither Recommendations nor summarised practice - so every threshold is an engineering default. Units are a gate (P2.1) and gestational age is mandatory context (P4.2). Validated only against synthetic phantoms: no public placental ASL data exists.
-
-## Not yet tagged
-
-These numeric config fields carry no entry in the machine-readable table, so
-`provenance_of()` reports them as uncalibrated by default. Listing them here
-is the to-do, not a claim that they are calibrated.
-
-`brain_cbf_absurd_hi` · `brain_cbf_absurd_lo` · `brain_mask_percentile` · `kidney_min_medulla_voxels` · `kidney_min_repetitions` · `kidney_min_roi_voxels` · `kidney_min_slice_voxels` · `kidney_min_surviving_pairs` · `kidney_slice_finite_frac` · `kidney_slice_usable_warn` · `placenta_bad_volume_frac` · `placenta_contraction_drop` · `placenta_covered_frac` · `placenta_edge_voxel_frac` · `placenta_ga_max_wk` · `placenta_good_surviving_pairs` · `placenta_holes_frac_warn` · `placenta_iqr_multiplier` · `placenta_min_roi_voxels` · `placenta_min_segments` · `placenta_min_surviving_pairs` · `placenta_min_volumes_contraction` · `placenta_ncc_pass` · `placenta_outlier_voxel_frac` · `placenta_rejected_frac_severe` · `placenta_rejected_frac_warn` · `placenta_segment_size` · `placenta_ssim_kernel_mm` · `placenta_ssim_pass` · `placenta_tsd_warn_pct`
 
 ---
 
