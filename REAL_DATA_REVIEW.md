@@ -155,7 +155,7 @@ library, so the package stays `numpy + nibabel`.
 
 ### Grading across the lifespan
 ```bash
-osipy-qc --demo --population neonate_term
+osipy-qc --demo --population neonate
 ```
 
 ---

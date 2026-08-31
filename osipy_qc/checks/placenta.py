@@ -46,7 +46,7 @@ from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
 from ..utils.mathops import pearson
 from ..utils.roi import (as_mask, component_sizes, largest_component_fraction,
-                         local_ssim, roi_stats, roi_values)
+                         local_ssim, roi_values)
 
 ORGAN = "placenta"
 

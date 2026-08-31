@@ -836,9 +836,6 @@ def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
     file drop because a mask is not recognisable by filename in general, and
     because these facts are not in any NIfTI header.
     """
-    import nibabel as nib
-    import numpy as np
-
     out: dict = {}
     prefix = f"{organ}__"
 
@@ -1355,8 +1352,6 @@ class QCHandler(http.server.BaseHTTPRequestHandler):
     def _effective(self, batch: dict):
         """(subjects, summary, cfg) for the currently applied overrides, memoised
         so images are only re-rendered when the config actually changes."""
-        import urllib.parse as up
-
         from .batch import cfg_from_params, regrade, summarise
 
         overrides = batch.get("overrides") or {}
@@ -1561,7 +1556,6 @@ def serve_dashboard(subjects, cfg=None, dataset: str = "cohort",
                     host: str = "127.0.0.1", port: int = 8000,
                     open_browser: bool = True) -> None:
     """Run the cohort dashboard over an already-graded list of Subjects."""
-    from .batch import summarise
     from .core.config import QCConfig
 
     cfg = cfg or QCConfig()

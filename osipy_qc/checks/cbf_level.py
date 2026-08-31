@@ -22,8 +22,7 @@ import numpy as np
 from ..core.config import QCConfig
 from ..core.registry import register_qc_check
 from ..core.result import CheckResult, Verdict
-from ..utils.masks import (brain_mask_fallback, clean_nonfinite, coverage_fraction,
-                           covered_tissue_mask)
+from ..utils.masks import brain_mask_fallback, clean_nonfinite, covered_tissue_mask
 
 
 def _gm_wm_values(cbf, gm, wm, cfg):
