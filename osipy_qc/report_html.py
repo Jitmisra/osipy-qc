@@ -334,8 +334,38 @@ def _acq_panel(cfg: QCConfig) -> str:
 # --------------------------------------------------------------------------- #
 # figures
 # --------------------------------------------------------------------------- #
+def _organ_roi(inputs: dict) -> tuple[object | None, str]:
+    """The ROI a non-brain report should draw its masked view and histogram over.
+
+    Kidney ships one mask per side, so they are unioned - a report that showed
+    only the left cortex would be quietly describing half the scan.
+    """
+    import numpy as _np
+
+    for key, label in (("cortex_masks", "cortex"), ("kidney_masks", "kidney"),
+                       ("placenta_mask", "placenta"), ("masks", "ROI")):
+        v = inputs.get(key)
+        if v is None:
+            continue
+        if isinstance(v, dict):
+            parts = [_np.asarray(m, dtype=float) for m in v.values() if m is not None]
+            if not parts:
+                continue
+            roi = parts[0]
+            for p in parts[1:]:
+                if p.shape == roi.shape:
+                    roi = _np.maximum(roi, p)
+            return roi, label
+        return v, label
+    return None, ""
+
+
 def _figures(inputs: dict, cfg: QCConfig) -> str:
-    cbf = inputs.get("cbf")
+    # The map lives under a different key per organ - the kidney loader calls it
+    # rbf_map and the placenta loader perfusion_map. Reading only "cbf" meant
+    # every kidney and placenta report shipped with no images at all.
+    cbf = next((inputs[k] for k in ("cbf", "rbf_map", "perfusion_map", "perfusion")
+                if inputs.get(k) is not None), None)
     if cbf is None:
         return ""
     gm, wm = inputs.get("gm"), inputs.get("wm")
@@ -348,6 +378,13 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
     # The bar is styled by the existing `figure svg` rule and carries literal
     # colours, so it adds no token a print block would have to re-declare.
     window: tuple[float, float] | None = None
+    # Hoisted out of the try: the non-brain block below also uses them, and a
+    # mosaic failure must not turn into a NameError there.
+    organ = getattr(cfg, "organ", "brain")
+    map_name = {"brain": "CBF map", "kidney": "RBF map",
+                "placenta": "Perfusion map"}.get(organ, "Perfusion map")
+    quantity = {"brain": "CBF", "kidney": "RBF",
+                "placenta": "perfusion"}.get(organ, "perfusion")
     try:
         window = mosaic_window(cbf)
         lo, hi = window
@@ -355,11 +392,6 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
         # the axis it resolved from the voxel sizes, which is the slice-encoding
         # direction in real data but is not necessarily "axial" - and a placenta
         # map is not a "CBF map".
-        organ = getattr(cfg, "organ", "brain")
-        map_name = {"brain": "CBF map", "kidney": "RBF map",
-                    "placenta": "Perfusion map"}.get(organ, "Perfusion map")
-        quantity = {"brain": "CBF", "kidney": "RBF",
-                    "placenta": "perfusion"}.get(organ, "perfusion")
         figs.append(
             f'<figure><img alt="{map_name}: evenly spaced slices, dark violet to bright yellow '
             'is low to high, cyan is negative" '
@@ -418,6 +450,40 @@ def _figures(inputs: dict, cfg: QCConfig) -> str:
             )
         except Exception as exc:
             figs.append(f'<figure><figcaption>WM histogram unavailable: {esc(exc)}</figcaption></figure>')
+
+    # Non-brain organs have no GM/WM, so the two blocks above never fire and the
+    # report used to end at the mosaic. Draw the same pair over the organ's own
+    # ROI instead: the masked view, and the distribution inside it. No band is
+    # shaded, because neither kidney nor placenta has a published normal range
+    # to shade - that absence is the whole point of those modules.
+    if gm is None and window is not None:
+        roi, roi_label = _organ_roi(inputs)
+        if roi is not None:
+            try:
+                roi_arr = np.asarray(roi, dtype=float)
+                map_arr = np.asarray(cbf, dtype=float)
+                while roi_arr.ndim == 4 and roi_arr.shape[3] == 1:
+                    roi_arr = roi_arr[..., 0]
+                if roi_arr.shape == map_arr.shape:
+                    lo, hi = window
+                    overlay = np.where(roi_arr > 0.5, map_arr, 0.0)
+                    figs.append(
+                        f'<figure><img alt="{quantity} inside the {roi_label} mask, on the same '
+                        'colour scale as the map above" src="'
+                        + png_data_uri(slice_mosaic(overlay, vmin=lo, vmax=hi)) + '">'
+                        + colorbar_svg(lo, hi)
+                        + f'<figcaption>{map_name} inside the <b>{esc(roi_label)}</b> mask only, on '
+                          'the same scale as the map above so the two can be compared. Gaps mean '
+                          'the mask covers voxels the scan never imaged.</figcaption></figure>')
+                    vals = map_arr[roi_arr > 0.5]
+                    figs.append(
+                        "<figure>" + histogram_svg(vals, label=f"{roi_label} {quantity} ({CBF_UNITS})")
+                        + f"<figcaption>Distribution of {quantity} inside the "
+                          f"<b>{esc(roi_label)}</b> mask. No band is shaded: no published normal "
+                          "range exists for this organ, so the report shows the shape and "
+                          "grades nothing from it.</figcaption></figure>")
+            except Exception as exc:
+                figs.append(f'<figure><figcaption>organ figures unavailable: {esc(exc)}</figcaption></figure>')
 
     # Give each raster figure a click-to-zoom target. SVG histograms are already
     # vector and scale with the page, so only the PNG mosaics get one.
