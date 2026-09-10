@@ -45,5 +45,6 @@ include = ["osipy_qc*"]
 osipy_qc = ["py.typed"]
 
 [tool.pytest.ini_options]
+markers = ["uses_real_model: needs the private QEI-Net weights"]
 testpaths = ["tests"]
 addopts = "-q"

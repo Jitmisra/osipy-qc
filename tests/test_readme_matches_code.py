@@ -26,7 +26,7 @@ from osipy_qc.report import run_qc
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 README = (ROOT / "README.md").read_text()
 
-ORGAN_COUNTS = {"brain": 20, "kidney": 19, "placenta": 15}
+ORGAN_COUNTS = {"brain": 21, "kidney": 19, "placenta": 15}
 
 
 def _section(organ: str) -> str:

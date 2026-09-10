@@ -264,6 +264,11 @@ def load_cbf_inputs(cbf: str, gm: str | None = None, wm: str | None = None,
     inputs: dict = {
         "cbf": _load(cbf),
         "voxel_mm": tuple(round(float(z), 3) for z in img.header.get_zooms()[:3]),
+        # Kept so a check can reach the file rather than the array. QEI-Net
+        # resamples to its own RAS grid, which needs the affine and orientation
+        # a bare array has already thrown away.
+        "cbf_path": str(cbf),
+        "affine": img.affine,
     }
     if gm is not None:
         inputs["gm"] = _load(gm)

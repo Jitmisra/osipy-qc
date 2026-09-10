@@ -240,7 +240,7 @@ osipy-qc data/my_raw_scan/ --json   # machine-readable
 
 ---
 
-## 6. What it checks — 54 checks, three organs, two streams
+## 6. What it checks — 55 checks, three organs, two streams
 
 Two streams run against every organ: **Stream B** asks *is the perfusion map good?*,
 **Stream A** asks *was the raw scan acquired correctly?* Pick the organ with
@@ -260,16 +260,17 @@ the brain loader has no concept of them and would silently drop every one.
 
 | organ | checks | what backs the numbers |
 |---|---:|---|
-| [brain](#brain--20-checks) | 20 | QEI (Dolui 2024), ASL White Paper, ASLPrep, ExploreASL |
+| [brain](#brain--21-checks) | 21 | QEI (Dolui 2024), ASL White Paper, ASLPrep, ExploreASL |
 | [kidney](#kidney--19-checks) | 19 | Nery 2020 renal consensus — 59 statements, **zero numeric thresholds** |
 | [placenta](#placenta--15-checks) | 15 | Taso 2023 — neither recommendations nor summarised practice |
 
-### brain — 20 checks
+### brain — 21 checks
 
 **Stream B — is the CBF map good?**
 | Check | What |
 |---|---|
 | `1.qei` | Quality Evaluation Index (Dolui 2024), ASLPrep-faithful |
+| `1.1.qei_net` | QEI-Net, the deep-learning index (Beltran Urbano). **Optional** — the model is not shipped; N/A unless configured. Reported, never graded: no validated cut-off is published yet |
 | `2.1.spatial_cov` | spatial CoV, ExploreASL 3-tier (vascular >0.67, artifactual >1.0) |
 | `2.2.snr` | spatial SNR (= 1/sCoV) + tSNR |
 | `2.3.histogram` | GM CBF shape — **INFO only** (no published skewness cutoff exists) |

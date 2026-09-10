@@ -25,3 +25,13 @@ Data_for_Agnik/
 
 # the frontend build is produced by `npm --prefix web run build`
 web/node_modules/
+
+# QEI-Net (Beltran Urbano). Shared privately for integration work and NOT ours
+# to redistribute: the weights stay unpublished until the paper is out. The
+# package reads them from a path on the user's machine and never ships them.
+qei_inference_package/
+qei_inference_package.zip
+weights/
+*.pth
+*.pt
+*.ckpt

@@ -58,7 +58,7 @@ def _grade(body):
 # registry / config wiring
 # --------------------------------------------------------------------------- #
 def test_every_organ_is_registered_profiled_and_tunable():
-    assert organs_covered() == {"brain": 20, "kidney": 19, "placenta": 15}
+    assert organs_covered() == {"brain": 21, "kidney": 19, "placenta": 15}
     assert set(ORGANS) == set(ORGAN_LIST)
     cfg = QCConfig()
     for organ in ORGAN_LIST:

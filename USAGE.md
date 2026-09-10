@@ -303,3 +303,59 @@ are one of the open asks for the mentors.
 > --pvcorr`. Both folders are git-ignored (the data isn't redistributable), so
 > a fresh clone won't have them — this section documents the exact real run,
 > not a reproducible fresh-clone command.
+
+---
+
+## QEI-Net, the optional deep-learning quality index
+
+`1.1.qei_net` scores a CBF map with the deep-learning QEI of Beltran Urbano et al.
+**The model is not part of this package.** Its weights are unpublished and are not
+ours to redistribute, so the check shells out to the author's own inference script
+in a separate environment and reads one number back.
+
+Without it configured the check reports N/A and nothing else changes. It is marked
+N/A rather than UNKNOWN on purpose: UNKNOWN means the *data* was missing something
+and dents the coverage figure, whereas a model you chose not to install says nothing
+about the scan in front of you.
+
+### Setting it up
+
+The model needs torch, torchio and SimpleITK, which this package deliberately does
+not depend on. Put them in their own environment:
+
+```bash
+python3 -m venv ~/qei_env
+~/qei_env/bin/pip install -r /path/to/qei_inference_package/requirements.txt
+
+export OSIPY_QEI_NET_PYTHON=~/qei_env/bin/python
+export OSIPY_QEI_NET_SCRIPT=/path/to/qei_inference_package/src/run_qei.py
+```
+
+Paths come from the environment rather than from a config file so that a path to
+somebody else's unpublished model never lands in a committed file. `.gitignore`
+already refuses `*.pth`, `*.ckpt`, `weights/` and `qei_inference_package/`.
+
+### What it reports
+
+The score is reported as INFO and never decides a verdict, because no validated
+cut-off for this model has been published. Reporting a number is honest; inventing
+a line to grade it against would not be.
+
+Each result records a fingerprint of the weights that produced it, so a score can
+always be traced to the model version behind it.
+
+### Why it refuses some maps
+
+The model normalises with `clip(cbf, -100, 100) / 100`, which is right for a
+correctly quantified map and destructive for a mis-scaled one. On a real GE map
+whose calibration was about fifty times too high, 74% of the voxels inside the
+brain mask pinned to +1.0, only two distinct values survived, and the network still
+returned 0.634 while the classical QEI scored the same map 0.0006.
+
+So the check measures the saturated fraction first and reports UNKNOWN instead of a
+score when more than 30% of the brain sits at the clip bound, pointing at
+`3.1.cbf_level`. A number computed from a flattened volume is not a quality
+measurement.
+
+Run both indices rather than choosing between them. They fail differently, which is
+the point.
