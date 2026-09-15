@@ -344,20 +344,73 @@ about the scan in front of you.
 
 ### Setting it up
 
-The model needs torch, torchio and SimpleITK, which this package deliberately does
-not depend on. Put them in their own environment:
+You need the inference package and its weights from the model's authors; they are
+not distributed here. Unpack it so `src/` and `weights/` sit side by side:
+
+```
+qei_inference_package/
+  requirements.txt
+  src/     run_qei.py, network.py, preprocess.py
+  weights/ fold0/ fold1/ fold2/ fold3/ fold4/   each with best_model.pth
+```
+
+All five folds are expected by default — the score is their ensemble mean. Fewer
+is possible with `--folds`, but then it is a different number and should not be
+compared with a five-fold one.
+
+**1. Give it its own environment.** The model needs torch, torchio and SimpleITK.
+This package deliberately depends on none of them, and that separation is the
+point: `osipy_qc` stays pure numpy + nibabel, and torch lives somewhere else.
 
 ```bash
 python3 -m venv ~/qei_env
 ~/qei_env/bin/pip install -r /path/to/qei_inference_package/requirements.txt
+```
 
+If those pins do not resolve on your Python — they are exact, and `torch==2.14.0`
+in particular may not have a build for your platform — install what the code
+actually imports instead, which is five packages:
+
+```bash
+~/qei_env/bin/pip install torch torchio nibabel numpy pandas
+```
+
+`torchio` brings SimpleITK and scipy with it. Verified working on Python 3.14
+with torch 2.12.0, which is not what the pin asks for.
+
+**2. Check the model runs on its own**, before involving this package. It prints
+one number to stdout and nothing else:
+
+```bash
+~/qei_env/bin/python /path/to/qei_inference_package/src/run_qei.py \
+    --single /path/to/cbf.nii.gz --mask /path/to/brainmask.nii.gz
+```
+
+Doing this first means a failure is attributable. If it fails here it is the
+model's environment; if it works here and not through `osipy-qc`, it is the
+wiring below.
+
+**3. Wire it in.** Two environment variables, and nothing else changes:
+
+```bash
 export OSIPY_QEI_NET_PYTHON=~/qei_env/bin/python
 export OSIPY_QEI_NET_SCRIPT=/path/to/qei_inference_package/src/run_qei.py
+
+osipy-qc /path/to/subject_folder
 ```
+
+`1.1.qei_net` should now read `QEI-Net 0.xxx [model <fingerprint>]` instead of
+"not configured". If it still says not configured, the variables are not reaching
+the process; if it says "is not at the path given", one of the two paths is wrong.
+
+The same two variables work for the web console — set them before `--serve` and
+uploads are scored with the model too.
 
 Paths come from the environment rather than from a config file so that a path to
 somebody else's unpublished model never lands in a committed file. `.gitignore`
-already refuses `*.pth`, `*.ckpt`, `weights/` and `qei_inference_package/`.
+refuses `*.pth`, `*.pt`, `*.ckpt`, `weights/` and `qei_inference_package/`, and
+`test_the_weights_are_ignored_by_git` shells out to `git check-ignore` to prove
+those rules still bite.
 
 ### What it reports
 
