@@ -301,7 +301,11 @@ def _kpi_tiles(by: dict[str, dict], cfg: QCConfig) -> str:
         col = colour_of("4.2.coverage")
         tiles.append(
             f'<div class="card kpi"><div class="label">GM coverage</div>'
-            f'<div class="value num" style="color:{col}">{cov*100:.0f}<span class="unit"> %</span></div>'
+            # One decimal, matching the check row this tile summarises. At zero
+            # decimals a real 99.55% rendered as a flat "100", and 100% coverage
+            # is a claim in its own right - it says the ASL imaged the WHOLE GM
+            # ROI. Rounding up into it is the one direction that must not happen.
+            f'<div class="value num" style="color:{col}">{cov*100:.1f}<span class="unit"> %</span></div>'
             f'<div class="foot">of the ROI imaged by the ASL</div></div>'
         )
 

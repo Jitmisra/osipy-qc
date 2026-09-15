@@ -357,3 +357,24 @@ def test_the_mentor_dataset_grades_both_streams():
     assert by["6.2.m0_tr"].verdict is Verdict.PASS
     assert by["6.2.m0_tr"].metric["tr_seconds"] == pytest.approx(6.0)
     assert by["7.1.motion"].metric.get("mean_dvars") is not None
+
+
+# --------------------------------------------------------------------------- #
+# the summary tiles must agree with the checks they summarise
+# --------------------------------------------------------------------------- #
+def test_partial_gm_coverage_is_not_rounded_up_to_a_flat_100_percent():
+    """Seen on a real report: the tile read "GM coverage 100 %" while the check
+    row under it read "99.6%". Same number, two roundings.
+
+    100% coverage is a claim in its own right - the ASL imaged the WHOLE GM ROI -
+    so rounding up into it is the one direction that must not happen.
+    """
+    from osipy_qc.core.result import CheckResult
+    from osipy_qc.report_html import render_html
+    from osipy_qc.report import QCReport
+
+    r = CheckResult("4.2.coverage", Verdict.PASS, metric={"gm_coverage": 0.9955},
+                    reason="99.6% of the GM ROI is covered by CBF data")
+    html = render_html(QCReport(overall=Verdict.PASS, results=[r]), inputs={}, cfg=QCConfig())
+    assert "99.6" in html
+    assert ">100<" not in html, "99.55% coverage was rendered as a flat 100%"
