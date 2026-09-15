@@ -50,7 +50,28 @@ osipy-qc --serve            # -> http://127.0.0.1:8000
 ```
 Upload a CBF map (+ optional GM/WM/CSF), pick the population, get the full visual
 report. The uploaded files are written to a temp folder and deleted as soon as
-grading finishes. The graded arrays of the **last few uploads** are then held in
+grading finishes.
+
+**A folder of subject folders is graded as a cohort.** Drop `my_cohort/` where
+each `sub-XX/` holds that subject's files, and one page comes back with the
+ledger — worst subject first — plus every subject's full report underneath it.
+Same self-contained HTML as a single scan, so it can be emailed.
+
+A folder counts as a subject when it holds a CBF map or an ASL series. That rule
+is what stops a single BIDS subject (`sub-01/anat` + `sub-01/perf`, two folders,
+one person) being read as a two-subject cohort. Each subject is then graded on
+the checks *its own* files justify, so a cohort of bare CBF maps is not dragged
+to WARN by ten Stream-A checks with nothing to look at, and a subject that
+shipped its raw series gets those checks for real — two subjects in one cohort
+can legitimately be graded on different sets, and each report says how many.
+
+Capped at 12 subjects per upload (`OSIPY_MAX_COHORT`), because every subject's
+arrays are held at once so its figures can be drawn — that is a memory ceiling,
+not a politeness limit. Above 8 subjects the per-subject figures are dropped and
+the page says so; four mosaics each would run it into the tens of megabytes.
+
+For a cohort already sitting on the machine running the server, `--dashboard
+FOLDER` grades it in place and serves the interactive React dashboard instead. The graded arrays of the **last few uploads** are then held in
 memory so their figures can be drawn on demand; they are evicted as new uploads
 arrive and are gone when the process stops. Nothing is written to disk and
 nothing is sent anywhere.

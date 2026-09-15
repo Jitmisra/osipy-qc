@@ -187,6 +187,33 @@ Three details worth knowing:
 
 The same applies to the web console: drag the folder in and both streams run.
 
+### (a3) A folder of subjects — the whole cohort at once
+
+```bash
+osipy-qc --serve        # then drop my_cohort/ into the page
+```
+
+```
+my_cohort/
+  sub-01/  cbf.nii.gz, GM, WM        ->  PASS
+  sub-02/  cbf.nii.gz, GM, WM        ->  FAIL
+  sub-03/  cbf + raw/PCASL.nii.gz    ->  WARN
+```
+
+One page comes back: the ledger sorted worst-first, then every subject's full
+report underneath. Self-contained HTML, so it can be emailed like any single
+report. Each subject is graded on the checks its own files justify, so sub-03
+above gets the raw-data checks and the other two are not asked for an M0 they
+never had.
+
+A folder is a subject when it holds a CBF map or an ASL series — which is what
+keeps a single BIDS subject (`sub-01/anat` + `sub-01/perf`) from reading as two
+people. Capped at 12 subjects per upload; above 8 the per-subject figures are
+dropped and the page says so.
+
+From the command line, `osipy-qc --dashboard my_cohort/` grades the same folder
+in place and serves an interactive dashboard.
+
 ### (b) CBF-map QC — Stream B (CBF maps produced with ASLPrep)
 
 The pipeline wrote a CBF map per dataset into `output/aslprep/`. Grade each one:

@@ -477,6 +477,7 @@ def _upload_page(error: str = "") -> str:
     )
     thr_groups, thr_defaults = _threshold_groups()
     role_rules, role_labels, name_help = _role_rules()
+    max_cohort = MAX_COHORT_SUBJECTS
     err = f'<div class="err"><b>Could not grade that.</b> {esc(error)}</div>' if error else ""
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -491,7 +492,7 @@ def _upload_page(error: str = "") -> str:
     <h1>Grade an ASL scan</h1>
     <p>Drop in a CBF map, the raw acquisition, or both, and get an interpretable quality
        report &mdash; a verdict per check, with the reason and the reference behind every
-       number.</p>
+       number. Drop a folder of subject folders and the whole cohort is graded at once.</p>
   </div>
   {err}
   <div class="note">
@@ -523,7 +524,7 @@ def _upload_page(error: str = "") -> str:
     {_organ_mask_boxes()}
     {_organ_fact_fields()}
 
-    <div class="field-label">Raw acquisition, or a whole subject folder
+    <div class="field-label">Raw acquisition, a subject folder, or a whole cohort
       <span class="req">one of the two</span>
       <span class="opt">schema, control/label, M0, motion, data type</span></div>
     <div class="drop dropall" id="zone">
@@ -531,12 +532,14 @@ def _upload_page(error: str = "") -> str:
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
       <div class="txt">
-        <b>Drop the raw files here &mdash; or the whole subject folder</b>
+        <b>Drop the raw files here &mdash; or a whole folder</b>
         <small>The ASL series, M0 and structural, each recognised by its filename;
         if a name is unusual, use the boxes underneath instead &mdash; they ignore the
         name completely. <b>A folder works too</b>, subfolders included: if it also
         holds a pipeline&rsquo;s CBF map and GM/WM/CSF maps, those are found as well
-        and every box above can stay empty.</small>
+        and every box above can stay empty. <b>A folder of subject folders is graded
+        as a cohort</b> &mdash; you get the ledger and every subject&rsquo;s report in
+        one page, up to {max_cohort} subjects.</small>
         <div class="dropbtns">
           <button type="button" id="pickfiles" class="dbtn">Choose files&hellip;</button>
           <button type="button" id="pickdir" class="dbtn dbtn-alt">Choose a folder&hellip;</button>
@@ -826,6 +829,16 @@ def _parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, byt
 _UPLOADS: dict[str, object] = {}
 _UPLOAD_KEEP = 4
 
+#: A cohort is graded in one request and every subject's arrays are held for its
+#: figures, so this is a real memory ceiling, not a politeness limit. Twelve
+#: subjects of a typical 3-D ASL sit comfortably inside the 512 MB the free
+#: Render container gets; eighty would not.
+MAX_COHORT_SUBJECTS = int(os.environ.get("OSIPY_MAX_COHORT", "12"))
+
+#: Depth of uploaded directory structure kept. A cohort is `cohort/sub-01/...`,
+#: sometimes with a `raw/` or `perf/` under that, so three is already generous.
+_MAX_UPLOAD_DEPTH = 3
+
 
 def _remember_upload(subject) -> str:
     import secrets
@@ -837,24 +850,14 @@ def _remember_upload(subject) -> str:
 
 
 def _checks_for(has_cbf: bool, has_raw: bool, organ: str = "brain") -> list[str]:
-    """The check set the supplied inputs justify.
+    """The check set the supplied inputs justify - see `batch.checks_for`.
 
-    Running the whole registry regardless is what made a flawless CBF map WARN:
-    ten Stream-A checks had nothing to look at. The set follows the inputs in BOTH
-    directions, which is the point — a raw-only upload must not be asked for a CBF
-    map either, and Stream A grades the acquisition without one.
+    The rule used to be written out here as well as in the batch loader, and the
+    two were the same question answered twice. A cohort upload runs through both
+    in one request, so they cannot be allowed to disagree.
     """
-    from .batch import cbf_map_checks
-    from .core.registry import all_checks
-
-    if has_cbf and has_raw:
-        # 4.1 needs an ASL mask AND a structural mask, and no loader in the package
-        # produces either, so including it only ever reports a missing check that
-        # no upload can supply.
-        return [n for n in all_checks(organ) if n != "4.1.coregistration"]
-    if has_raw:
-        return [n for n, e in all_checks(organ).items() if e.get("stream") == "A"]
-    return cbf_map_checks(organ)
+    from .batch import checks_for
+    return checks_for(has_cbf, has_raw, organ)
 
 
 def _organ_inputs(organ: str, fields: dict, tmp: str, existing: dict) -> dict:
@@ -1068,7 +1071,12 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
 
         role_overrides: dict[str, str] = {}
         for fname, data, role in raw_parts:
-            safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(fname))[-80:]
+            # The RELATIVE path, not just the basename. Flattening was fine while
+            # an upload was one subject, and destroys a cohort: every subject
+            # ships a `cbf.nii.gz`, so sub-02's file landed on sub-01's and the
+            # cohort collapsed to one scan made of parts of several people.
+            rel = _safe_relpath(fname, client_dir)
+            safe = rel.rsplit("/", 1)[-1]
             # BIDS sidecars keep their own extension so load_folder's
             # _find_sidecars can see them. The old blanket rename turned
             # sub-01_asl.json into sub-01_asl.json.nii.gz - which both hid the
@@ -1085,12 +1093,34 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
                     break
             else:
                 safe += ".nii.gz"
-            os.makedirs(raw_dir, exist_ok=True)
-            with open(os.path.join(raw_dir, safe), "wb") as fh:
+            sub = rel.rsplit("/", 1)[0] if "/" in rel else ""
+            dest_dir = os.path.join(raw_dir, *sub.split("/")) if sub else raw_dir
+            dest = os.path.join(dest_dir, safe)
+            # Every segment is already sanitised and "..' is dropped, so this
+            # cannot fail - which is exactly why it is worth asserting. A path
+            # that escapes the temp dir writes attacker-chosen bytes to disk.
+            if not _within(os.path.realpath(dest), os.path.realpath(tmp)):
+                raise ValueError(f"refusing to write outside the upload area: {fname!r}")
+            os.makedirs(dest_dir, exist_ok=True)
+            with open(dest, "wb") as fh:
                 fh.write(data)
+            # keyed by basename, because that is what load_folder matches on
             if role:
                 role_overrides[safe] = role
             saved_raw = True
+
+        # ---- one subject, or a cohort? ------------------------------------
+        # Asked from the NIfTI headers alone, so surveying the upload does not
+        # cost a second full load of every array. A folder counts as a subject
+        # when it holds a CBF map or an ASL series - see batch._is_subject, which
+        # is what stops a BIDS `sub-01/{anat,perf}` reading as two people.
+        if saved_raw and not paths["cbf"]:
+            from .batch import subject_dirs
+
+            sids = subject_dirs(raw_dir)
+            if len(sids) >= 2:
+                return _grade_cohort(raw_dir, sids, cfg, organ,
+                                     client_dir or "uploaded cohort")
 
         if not paths["cbf"] and not saved_raw:
             raise ValueError("Nothing to grade - upload a CBF map, raw acquisition "
@@ -1154,6 +1184,59 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         return payload
 
 
+def _safe_relpath(fname: str, strip_root: str = "") -> str:
+    """An uploaded file's path, made safe to join onto the upload directory.
+
+    A browser sends `cohort/sub-01/perf/cbf.nii.gz` for a folder pick. Every
+    segment is reduced to the same character set the basename always was, `.`
+    and `..` are dropped outright rather than escaped, and the depth is capped -
+    so no input can climb out of the upload directory or bury files arbitrarily
+    deep. The leading segment is the folder the user picked and is stripped,
+    because it is already the name of the directory being written into.
+    """
+    parts = [p for p in fname.replace("\\", "/").split("/")
+             if p not in ("", ".", "..")]
+    if strip_root and parts and parts[0] == strip_root:
+        parts = parts[1:]
+    parts = [q for q in (re.sub(r"[^A-Za-z0-9._-]", "_", p)[-80:] for p in parts) if q]
+    if not parts:
+        return "upload.nii.gz"
+    # keep the filename plus at most _MAX_UPLOAD_DEPTH-1 directories above it
+    return "/".join(parts[-_MAX_UPLOAD_DEPTH:])
+
+
+def _grade_cohort(raw_dir: str, sids: list[str], cfg, organ: str, dataset: str) -> dict:
+    """Grade an uploaded folder of subjects and return the cohort payload.
+
+    Each subject is graded on the checks its OWN files justify, which is what
+    `grade_folder` does by default - so a cohort of bare CBF maps is not dragged
+    to WARN by ten Stream-A checks with nothing to look at, and a subject that
+    shipped its raw series as well gets those checks for real.
+    """
+    from .api import cohort_payload
+    from .batch import grade_folder, summarise
+
+    if len(sids) > MAX_COHORT_SUBJECTS:
+        raise ValueError(
+            f"That folder holds {len(sids)} subjects and the limit is "
+            f"{MAX_COHORT_SUBJECTS}. Every subject's arrays are held at once so "
+            "its images can be drawn, which is what the limit is protecting. "
+            "Split the cohort, or raise OSIPY_MAX_COHORT on a larger machine.")
+    subjects = grade_folder(raw_dir, cfg=cfg)
+    if len(subjects) < 2:
+        # The header survey said cohort and the full load disagreed. Better to
+        # say so than to render a one-row cohort table.
+        raise ValueError(
+            "Those folders looked like separate subjects but only "
+            f"{len(subjects)} could be graded. Upload one subject at a time.")
+    summary = summarise(subjects)
+    payload = cohort_payload(subjects, summary, cfg, dataset=dataset)
+    payload["uploaded"] = True
+    payload["cohort"] = True
+    payload["token"] = _remember_upload(subjects)      # a list, not a Subject
+    return payload
+
+
 def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> tuple[str, str]:
     """The same grading, rendered as the self-contained HTML report.
 
@@ -1161,11 +1244,16 @@ def _grade_upload_html(fields: dict[str, tuple[str, bytes]]) -> tuple[str, str]:
     Both paths call _grade_upload first, so the grading cannot differ between
     them — only the presentation does.
     """
-    from .report_html import render_html
+    from .report_html import render_cohort_html, render_html
     payload = _grade_upload(fields)             # grades and remembers the subject
-    subject = _UPLOADS[payload["token"]]
-    html = render_html(subject.report, inputs=subject.inputs, cfg=subject.cfg,
-                       served=True, title=f"ASL QC report — {subject.sid}")
+    held = _UPLOADS[payload["token"]]
+    if payload.get("cohort"):
+        from .batch import summarise
+        html = render_cohort_html(held, summarise(held), cfg=held[0].cfg,
+                                  dataset=payload.get("dataset") or "uploaded cohort")
+        return html, payload["token"]
+    html = render_html(held.report, inputs=held.inputs, cfg=held.cfg,
+                       served=True, title=f"ASL QC report — {held.sid}")
     return html, payload["token"]
 
 

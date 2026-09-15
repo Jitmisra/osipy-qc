@@ -473,12 +473,16 @@ def test_the_dropped_cbf_map_is_the_one_reported_on(clean_case):
     assert qei["metric"].get("qei") is not None
 
 
-def test_the_drop_zone_says_it_takes_a_whole_folder():
+def test_the_drop_zone_says_what_it_actually_takes():
     """It accepts a folder of pipeline output - CBF map, tissue maps and all -
-    and for a while it still called itself "Raw acquisition" and listed only the
-    Stream A checks. A reader following the labels would have filled four boxes
-    by hand to get what one folder pick already does."""
+    and a folder of those is graded as a cohort. For a while it called itself
+    "Raw acquisition" and listed only the Stream A checks; a reader following
+    the labels would have filled four boxes by hand to get what one folder pick
+    already does, and would never have discovered cohort mode at all."""
     page = web._upload_page()
-    assert "or a whole subject folder" in page
+    assert "a subject folder, or a whole cohort" in page
     assert "A folder works too" in page
     assert "every box above can stay empty" in page
+    assert "A folder of subject folders is graded" in page
+    assert f"up to {web.MAX_COHORT_SUBJECTS} subjects" in page
+    assert "{max_cohort}" not in page, "template placeholder left unrendered"

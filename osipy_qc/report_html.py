@@ -662,3 +662,136 @@ def write_html(report, path: str, inputs: dict | None = None,
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(render_html(report, inputs=inputs, cfg=cfg, title=title))
     return path
+
+
+# --------------------------------------------------------------------------- #
+# Cohort: many subjects in one self-contained page
+# --------------------------------------------------------------------------- #
+# The dashboard (--dashboard) already shows a cohort, but it grades a folder on
+# the SERVER'S disk and renders through the React app. Neither is available to
+# someone who just dropped a folder into the upload console in a browser, and
+# the deployed site is exactly that person. This is the same cohort, rendered
+# the way the single-scan console renders: one HTML file, no build step, no
+# external requests, openable offline and attachable to an email.
+
+#: Above this many subjects the per-subject figures are dropped. Four PNGs per
+#: subject at ~130 KB a report is fine for a handful and absurd for eighty; the
+#: page says which it did rather than quietly changing shape.
+COHORT_FIGURE_LIMIT = 8
+
+_COHORT_CSS = """
+.ledger{width:100%;border-collapse:collapse;margin:1.1rem 0 .4rem;font-size:.92rem}
+.ledger th{text-align:left;font-weight:600;font-size:.74rem;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);padding:.5rem .7rem;
+  border-bottom:1px solid var(--line)}
+.ledger td{padding:.55rem .7rem;border-bottom:1px solid var(--line);vertical-align:middle}
+.ledger tr:last-child td{border-bottom:none}
+.ledger .sid{font-family:ui-monospace,Menlo,monospace;font-weight:600}
+.ledger .num{font-variant-numeric:tabular-nums}
+.vpill{display:inline-block;padding:.12rem .5rem;border-radius:999px;
+  font-size:.74rem;font-weight:700;letter-spacing:.03em}
+.subj{margin:.6rem 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.subj>summary{cursor:pointer;padding:.7rem .9rem;font-weight:600;
+  font-family:ui-monospace,Menlo,monospace;list-style:none}
+.subj>summary::-webkit-details-marker{display:none}
+.subj>summary:hover{background:var(--card-hover,rgba(0,0,0,.02))}
+.subj[open]>summary{border-bottom:1px solid var(--line)}
+.subj .inner{padding:0 1rem 1rem}
+.cohort-stats{display:flex;flex-wrap:wrap;gap:.6rem;margin:.8rem 0}
+.cohort-stats .card{flex:1 1 8rem;min-width:8rem}
+@media (max-width:640px){.ledger .flagcol{display:none}}
+"""
+
+
+def _vpill(verdict: str) -> str:
+    fg, bg = VERDICT_COLOURS.get(verdict, ("#8A8079", "#F1ECE4"))
+    return f'<span class="vpill" style="color:{fg};background:{bg}">{esc(verdict)}</span>'
+
+
+def cohort_body(subjects, summary, cfg: QCConfig | None = None,
+                with_figures: bool | None = None) -> str:
+    """Ledger + per-subject reports, without the page chrome."""
+    from .api import ledger_row
+
+    cfg = cfg or QCConfig()
+    if with_figures is None:
+        with_figures = len(subjects) <= COHORT_FIGURE_LIMIT
+
+    rows = sorted((ledger_row(s) for s in subjects),
+                  key=lambda r: (r["severity"],
+                                 r["qei"] if r["qei"] is not None else 2.0))
+    by_sid = {s.sid: s for s in subjects}
+
+    counts = summary.counts
+    stats = "".join(
+        f'<div class="card kpi"><div class="label">{esc(v)}</div>'
+        f'<div class="value num" style="color:{VERDICT_COLOURS.get(v, ("#8A8079", ""))[0]}">'
+        f'{counts.get(v, 0)}</div>'
+        f'<div class="foot">of {summary.total}</div></div>'
+        for v in ("FAIL", "WARN", "PASS") if counts.get(v)
+    )
+
+    body = [
+        f'<h1 style="margin:.2rem 0 .1rem">{summary.total} subjects graded</h1>',
+        f'<div class="cohort-stats">{stats}</div>',
+        '<table class="ledger"><thead><tr>'
+        '<th>Subject</th><th>Verdict</th><th>QEI</th>'
+        '<th class="flagcol">Leading finding</th></tr></thead><tbody>',
+    ]
+    for r in rows:
+        qei = f'{r["qei"]:.3f}' if isinstance(r["qei"], (int, float)) else "&ndash;"
+        body.append(
+            f'<tr><td class="sid">{esc(r["sid"])}</td>'
+            f'<td>{_vpill(r["verdict"])}</td>'
+            f'<td class="num">{qei}</td>'
+            f'<td class="flagcol">{esc(r["flag"])}</td></tr>')
+    body.append('</tbody></table>')
+
+    if not with_figures:
+        body.append(
+            f'<div class="note">Per-subject images are omitted above '
+            f'{COHORT_FIGURE_LIMIT} subjects, because four mosaics each would run this '
+            f'page into the tens of megabytes. Grade a subject on its own to see them.'
+            '</div>')
+
+    # Worst first, so the reason for the cohort verdict is the first thing open.
+    for r in rows:
+        s = by_sid[r["sid"]]
+        inner = report_body(s.report, s.inputs if with_figures else {}, s.cfg,
+                            with_note=False)
+        body.append(
+            f'<details class="subj"><summary>{_vpill(r["verdict"])} '
+            f'&nbsp;{esc(r["sid"])}</summary>'
+            f'<div class="inner">{inner}</div></details>')
+
+    body.append(
+        '<div class="note" style="margin-top:1.6rem">A verdict marked '
+        '<b>provisional</b> was decided by an <b>uncalibrated</b> cutoff &mdash; an '
+        'engineering default with no published derivation. Checks marked <b>N/A</b> or '
+        '<b>INFO</b> are excluded from the overall verdict. Each subject is graded on '
+        'the checks its own files justify, so two subjects in one cohort can be graded '
+        'on different sets &mdash; the count in each report says which.</div>')
+    return "".join(body)
+
+
+def render_cohort_html(subjects, summary, cfg: QCConfig | None = None,
+                       dataset: str = "cohort",
+                       with_figures: bool | None = None) -> str:
+    """Render a whole cohort as one self-contained HTML page."""
+    cfg = cfg or QCConfig()
+    meta = (f'population: {esc(cfg.population)} &middot; organ: {esc(cfg.organ)} '
+            f'&middot; strict: {esc(cfg.strict)}')
+    body = (
+        '<div class="topbar">'
+        f'{brand("ASL quality control")}'
+        f'<div class="spacer"></div><div class="meta mono">{meta}</div></div>'
+        f'<div class="wrap">{cohort_body(subjects, summary, cfg, with_figures)}</div>'
+        '<div class="footer">Generated by osipy-qc &mdash; pure NumPy + nibabel. '
+        'Every pixel is drawn from the arrays the checks graded; images encoded with the '
+        'standard library only.</div>'
+    )
+    return ("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            f"<title>{esc(dataset)} &mdash; ASL QC</title>{favicon_link()}"
+            f"<style>{BASE_CSS}{_REPORT_CSS}{_COHORT_CSS}</style></head>"
+            f"<body>{body}</body></html>")

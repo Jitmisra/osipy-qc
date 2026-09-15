@@ -214,45 +214,121 @@ class Subject:
 # --------------------------------------------------------------------------- #
 # building a batch
 # --------------------------------------------------------------------------- #
-def _find_cbf_inputs(subject_dir: str) -> dict | None:
-    """Locate a CBF map (+ tissue maps) inside a subject folder, tolerant of the
-    naming used by oxford_asl / ASLPrep / hand-named files. Returns the inputs
-    dict for run_qc, or None if no CBF map is found."""
-    from .io import load_cbf_inputs
+def subject_inputs(subject_dir: str) -> dict | None:
+    """Everything gradeable inside one subject folder, or None if nothing is.
 
-    def first(*patterns):
-        for pat in patterns:
-            hits = sorted(glob.glob(os.path.join(subject_dir, "**", pat), recursive=True))
-            hits = [h for h in hits if os.path.isfile(h)]
-            if hits:
-                return hits[0]
-        return None
+    This used to carry its own glob patterns - a fourth private copy of the
+    filename rules, after `classify_role`, the upload page, and the pipeline
+    adapters. It had drifted the way every copy of those rules has drifted:
+    `*_cbf.nii*` missed a real dataset's `..._label-meancbf.nii` (uncompressed,
+    and no underscore before "cbf"), so the subject was skipped entirely and
+    silently vanished from the cohort. `*gm*.nii*` went the other way and would
+    have matched `segmentation.nii.gz` as a grey-matter map.
 
-    cbf = first("perfusion_calib.nii*", "*_cbf.nii*", "*perfusion*.nii*", "cbf*.nii*")
-    if not cbf:
-        return None
-    gm = first("pvgm_inasl.nii*", "*pvgm*.nii*", "*label-GM_probseg*.nii*", "*gm*.nii*")
-    wm = first("pvwm_inasl.nii*", "*pvwm*.nii*", "*label-WM_probseg*.nii*", "*wm*.nii*")
-    csf = first("*pvcsf*.nii*", "*label-CSF_probseg*.nii*", "*csf*.nii*")
-    try:
-        return load_cbf_inputs(cbf, gm=gm, wm=wm, csf=csf)
-    except Exception:
-        # a shape mismatch etc. — still grade the CBF map alone
-        return load_cbf_inputs(cbf)
+    It now calls `load_folder`, which is what the CLI and the upload console
+    already use. Two things follow. Subjects are found by the one vocabulary the
+    rest of the package applies, and a subject folder that also holds its raw
+    acquisition gets Stream A graded too, instead of only the CBF map.
+    """
+    from .io import load_folder
+
+    inputs = load_folder(subject_dir)
+    return inputs if _is_subject(inputs) else None
+
+
+def _is_subject(inputs: dict) -> bool:
+    """Is there a scan here, or only supporting files?
+
+    A CBF map or an ASL series. Deliberately NOT "any recognised file": a BIDS
+    subject is laid out `sub-01/anat/` + `sub-01/perf/`, and counting a lone T1
+    as a subject would split one person into two rows of a cohort ledger - and,
+    worse, make the upload console read a single BIDS subject as a two-subject
+    cohort.
+    """
+    # cbf_path as well as cbf: with load_arrays=False the loader records where
+    # the map is without reading it, and `subject_dirs` relies on exactly that to
+    # survey a cohort from headers alone. Checking only `cbf` reported an empty
+    # cohort for a folder of four perfectly good CBF maps.
+    return bool(inputs.get("cbf") is not None or inputs.get("cbf_path")
+                or any(f.get("role") == "asl" for f in inputs.get("files") or []))
+
+
+def _has_raw(inputs: dict) -> bool:
+    """Did this folder contain an actual acquisition, as opposed to only maps?
+
+    Decides whether the Stream A checks are worth running. Asking for them when
+    the folder holds nothing but a CBF map adds ten UNKNOWNs and drags an
+    otherwise clean subject down the ledger. Wider than `_is_subject` on purpose:
+    an M0 sitting beside a CBF map justifies the M0 checks even though an M0 on
+    its own is not a subject.
+    """
+    return any(f.get("role") in ("asl", "m0", "t1")
+               for f in inputs.get("files") or [])
+
+
+def subject_dirs(folder: str) -> list[str]:
+    """Names of the immediate subdirectories that hold a gradeable scan.
+
+    Reads NIfTI headers only, never the voxels, so the upload console can ask
+    "is this one subject or a cohort?" without paying to load every array twice.
+    """
+    from .io import load_folder
+
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    for name in sorted(os.listdir(folder)):
+        d = os.path.join(folder, name)
+        if not os.path.isdir(d):
+            continue
+        try:
+            if _is_subject(load_folder(d, load_arrays=False)):
+                out.append(name)
+        except Exception:
+            # one unreadable folder must not hide the rest of the cohort
+            continue
+    return out
+
+
+def checks_for(has_map: bool, has_raw: bool, organ: str = "brain") -> list[str]:
+    """The check set the supplied inputs justify.
+
+    Running the whole registry regardless is what made a flawless CBF map WARN:
+    ten Stream-A checks had nothing to look at. The set follows the inputs in
+    BOTH directions, which is the point - a raw-only upload must not be asked for
+    a CBF map either, and Stream A grades the acquisition without one.
+
+    Lives here rather than in web.py because the upload console, the cohort
+    dashboard and the batch loader all have to answer this question the same way.
+    """
+    from .core.registry import all_checks
+
+    if has_map and has_raw:
+        # 4.1 needs an ASL mask AND a structural mask, and no loader in the
+        # package produces either, so including it only ever reports a missing
+        # check that no upload can supply.
+        return [n for n in all_checks(organ) if n != "4.1.coregistration"]
+    if has_raw:
+        return [n for n, e in all_checks(organ).items() if e.get("stream") == "A"]
+    return cbf_map_checks(organ)
 
 
 def grade_folder(folder: str, cfg: QCConfig | None = None,
                  checks: list[str] | None = None) -> list[Subject]:
     """Grade every subject subfolder under `folder`. Each immediate subdirectory
-    that contains a CBF map becomes one subject.
+    holding something gradeable becomes one subject.
 
-    Defaults to the CBF-map stream (`checks=stream_b_checks()`), since a folder of
-    CBF maps has no raw-data inputs — running the raw-data checks would only add
-    UNKNOWNs and drag every subject to WARN. Pass `checks=None` explicitly to run
-    the whole registry."""
+    With `checks` left as None the set is chosen PER SUBJECT from what that
+    subject's folder actually contains, via `checks_for`. A folder of bare CBF
+    maps gets the CBF-map stream, because asking it for an M0 would only add
+    UNKNOWNs and drag every subject to WARN; a folder that also holds the raw
+    acquisition gets Stream A as well, because the inputs are there.
+
+    Pass an explicit list to force one set across the whole cohort - which is
+    what you want when the cohort must be compared column by column.
+    """
     cfg = cfg or QCConfig()
-    if checks is None:
-        checks = cbf_map_checks(getattr(cfg, "organ", "brain") if cfg else "brain")
+    organ = getattr(cfg, "organ", "brain") or "brain"
     if not os.path.isdir(folder):
         raise NotADirectoryError(folder)
     subjects: list[Subject] = []
@@ -260,10 +336,12 @@ def grade_folder(folder: str, cfg: QCConfig | None = None,
         sub_dir = os.path.join(folder, name)
         if not os.path.isdir(sub_dir):
             continue
-        inputs = _find_cbf_inputs(sub_dir)
+        inputs = subject_inputs(sub_dir)
         if inputs is None:
             continue
-        subjects.append(Subject(sid=name, report=run_qc(inputs, cfg=cfg, checks=checks),
+        use = checks if checks is not None else checks_for(
+            inputs.get("cbf") is not None, _has_raw(inputs), organ)
+        subjects.append(Subject(sid=name, report=run_qc(inputs, cfg=cfg, checks=use),
                                 inputs=inputs, cfg=cfg))
     return subjects
 
