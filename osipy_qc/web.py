@@ -523,17 +523,20 @@ def _upload_page(error: str = "") -> str:
     {_organ_mask_boxes()}
     {_organ_fact_fields()}
 
-    <div class="field-label">Raw acquisition <span class="req">one of the two</span>
+    <div class="field-label">Raw acquisition, or a whole subject folder
+      <span class="req">one of the two</span>
       <span class="opt">schema, control/label, M0, motion, data type</span></div>
     <div class="drop dropall" id="zone">
       <input id="files" name="files" type="file" accept=".nii,.gz,.json,.tsv,application/gzip,application/x-gzip,application/octet-stream,application/json" multiple hidden>
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
       <div class="txt">
-        <b>Drop the raw files here</b>
-        <small>The ASL series, M0 and structural. Each is recognised by its filename;
+        <b>Drop the raw files here &mdash; or the whole subject folder</b>
+        <small>The ASL series, M0 and structural, each recognised by its filename;
         if a name is unusual, use the boxes underneath instead &mdash; they ignore the
-        name completely.</small>
+        name completely. <b>A folder works too</b>, subfolders included: if it also
+        holds a pipeline&rsquo;s CBF map and GM/WM/CSF maps, those are found as well
+        and every box above can stay empty.</small>
         <div class="dropbtns">
           <button type="button" id="pickfiles" class="dbtn">Choose files&hellip;</button>
           <button type="button" id="pickdir" class="dbtn dbtn-alt">Choose a folder&hellip;</button>
