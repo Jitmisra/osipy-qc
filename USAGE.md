@@ -224,8 +224,32 @@ resampling to the ASL grid first.
 function these wrap — use it directly if you want the `inputs` dict itself
 (e.g. to add extra keys before calling `run_qc`).
 
-`load_folder(folder, load_arrays=True) -> dict` is the Stream-A equivalent —
-what the CLI calls internally when you run `osipy-qc <folder>`.
+`load_folder(folder, load_arrays=True) -> dict` is what the CLI calls internally
+when you run `osipy-qc <folder>`. It recurses, and it reads **both** streams: raw
+acquisitions by filename (ASL / M0 / T1) and pipeline output as well — a
+quantified CBF map and GM/WM/CSF maps already in ASL space. So for a folder that
+holds a subject's derivatives plus the raw series, `osipy-qc <folder>` needs no
+adapter at all; the adapters above are for pointing at one specific directory.
+
+What it recognises as pipeline output is `classify_derivative(name, shape=None)`
+in `checks/schema.py` — `*cbf*`/`*perfusion*`/`*rbf*` for the map, and
+`*GM*`/`*WM*`/`*CSF*` with a `probseg`/`pv` style name for the tissue maps,
+3-D images only. That one function is also what the adapters and the upload page
+apply, so the three cannot drift apart.
+
+Three behaviours worth knowing:
+
+* The **M0 TR** is read from the NIfTI header when no sidecar states one — but
+  only from a 4-D image, only when the header declares its time unit, and it is
+  reported as `[NIfTI header (pixdim[4])]` so you can see where it came from.
+  `pixdim[4]` on a 3-D image is leftover data, not a repetition time.
+* Where **several CBF maps** sit in one folder, a calibrated map beats an
+  uncalibrated one (oxford_asl's `perfusion_calib` over `perfusion`) and an
+  unqualified name beats a `desc-` variant (ASLPrep's `_cbf` over
+  `_desc-score_cbf`). `8.2.data_type` names the one that was graded.
+* If the tissue maps turn out to be on a **different grid** from the CBF map,
+  Stream B is skipped instead of raising, and `8.2.data_type` says why. Stream A
+  still grades — one bad resample should not cost you the whole report.
 
 ---
 

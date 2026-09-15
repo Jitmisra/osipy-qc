@@ -14,7 +14,8 @@ import os
 import nibabel as nib
 import numpy as np
 
-from .checks.schema import classify_role, detect_dataset
+from .checks.schema import (classify_derivative, classify_role, detect_dataset,
+                           primary_asl, spatial_ndim)
 from .utils.masks import check_prob_range
 
 
@@ -159,15 +160,26 @@ def load_folder(folder: str, load_arrays: bool = True,
         img = nib.load(p)
         shape = tuple(int(s) for s in img.shape)
         voxel = tuple(round(float(z), 3) for z in img.header.get_zooms()[:3])
-        role = overrides.get(name) or classify_role(name)
+        # Order: an explicit per-role box beats everything, then the derivative
+        # vocabulary, then the acquisition one. Derivatives go SECOND because
+        # their names collide with the acquisition tokens and would otherwise be
+        # swallowed - a CBF map called `..._PCASL3D_label-meancbf.nii` matches
+        # "pcasl", and `..._label-GM_probseg_aslspace.nii.gz` matches "asl" on
+        # the word "aslspace". Both were being filed as the ASL acquisition.
+        role = (overrides.get(name)
+                or classify_derivative(name, shape=shape)
+                or classify_role(name))
         files.append({"name": name, "shape": shape, "voxel_mm": voxel, "path": p,
                       "role": role})
-        by_role[role].append(p)
+        by_role.setdefault(role, []).append(p)
 
     context = os.path.basename(folder.rstrip("/"))
     detected = detect_dataset(files, context)
     asl_files = [f for f in files if f["role"] == "asl"]
     m0_files = [f for f in files if f["role"] == "m0"]
+    # The series, not whichever 3-D file os.walk happened to reach first.
+    asl_primary = primary_asl(asl_files)
+    m0_primary = m0_files[0] if m0_files else None
 
     # ---- stated metadata beats inferred metadata --------------------------
     # detect_dataset guesses from shape and filename because that is all the
@@ -181,8 +193,8 @@ def load_folder(folder: str, load_arrays: bool = True,
     # claiming BS was on. A field of the wrong type degrades to "not stated".
     asl_json, m0_json, aslcontext = _find_sidecars(
         folder,
-        asl_name=asl_files[0]["name"] if asl_files else "",
-        m0_name=m0_files[0]["name"] if m0_files else "")
+        asl_name=asl_primary["name"] if asl_primary else "",
+        m0_name=m0_primary["name"] if m0_primary else "")
     if asl_json:
         for key, field in (("vendor", "Manufacturer"),
                            ("readout", "MRAcquisitionType"),
@@ -231,15 +243,125 @@ def load_folder(folder: str, load_arrays: bool = True,
         # is an actual series to hold them against
         inputs["aslcontext_rows"] = aslcontext
 
-    if asl_files:
-        inputs["asl_shape"] = asl_files[0]["shape"]
-        inputs["voxel_mm"] = asl_files[0]["voxel_mm"]
-        if load_arrays and len(asl_files[0]["shape"]) == 4:
-            inputs["asl_4d"] = np.asanyarray(nib.load(asl_files[0]["path"]).dataobj).astype(float)
-    if m0_files:
-        inputs["m0_shape"] = m0_files[0]["shape"]
+    if asl_primary:
+        inputs["asl_shape"] = asl_primary["shape"]
+        inputs["voxel_mm"] = asl_primary["voxel_mm"]
+        if load_arrays and spatial_ndim(asl_primary["shape"]) == 4:
+            inputs["asl_4d"] = _load(asl_primary["path"])
+    if m0_primary:
+        inputs["m0_shape"] = m0_primary["shape"]
+        # A TR the sidecar states always wins; this only fills the gap when there
+        # is no sidecar, which is every dataset this project has been handed.
+        if "m0_tr_s" not in inputs:
+            tr = _tr_from_header(m0_primary["path"])
+            if tr is not None:
+                inputs["m0_tr_s"] = tr
+                inputs["m0_tr_source"] = "NIfTI header (pixdim[4])"
+    if "m0_tr_s" in inputs and "m0_tr_source" not in inputs:
+        inputs["m0_tr_source"] = "BIDS sidecar"
+
+    if load_arrays:
+        inputs.update(_stream_b_from_derivatives(files))
+    else:
+        for role in ("cbf", "gm", "wm", "csf"):
+            hit = next((f for f in files if f["role"] == role), None)
+            if hit:
+                inputs[f"{role}_path"] = hit["path"]
 
     return inputs
+
+
+def _tr_from_header(path: str) -> float | None:
+    """The M0's repetition time as declared by the NIfTI header, or None.
+
+    Three conditions, and all of them are load-bearing, because the White Paper
+    TR rule decides a PASS/WARN and a fabricated TR would decide it wrongly:
+
+      * 4-D only. pixdim[4] on a 3-D image is leftover, not a measurement - the
+        MPRAGE in this project's own test data carries 1.000 there and the T1
+        carries 2.400. Read as a TR, either would WARN and hand the reader a
+        relaxation correction factor computed from a number that means nothing.
+      * the time unit must actually be declared, and is converted from ms/us.
+        An undeclared unit is not silently assumed to be seconds.
+      * strictly positive. 0 is how "unset" is spelled.
+    """
+    try:
+        hdr = nib.load(path).header
+        if int(hdr["dim"][0]) != 4:
+            return None
+        unit = hdr.get_xyzt_units()[1]
+        scale = {"sec": 1.0, "msec": 1e-3, "usec": 1e-6}.get(unit)
+        if scale is None:
+            return None
+        tr = float(hdr["pixdim"][4]) * scale
+        return tr if np.isfinite(tr) and tr > 0 else None
+    except (OSError, ValueError, KeyError, IndexError):
+        return None
+
+
+def _variant_rank(f: dict) -> tuple:
+    """Sort key picking the primary map out of a set of pipeline variants.
+
+    Three rules, in order:
+
+    1. A CALIBRATED map beats an uncalibrated one. oxford_asl writes both
+       `perfusion.nii.gz` and `perfusion_calib.nii.gz`, and only the second is
+       in mL/100g/min - it uses a trailing `_calib` to mean "calibrated" (the
+       same convention `_ROLE_RULES` documents). Grading the raw one against
+       published CBF bands would FAIL every scan for having the wrong units.
+       This rule has to come first, because the uncalibrated name is shorter
+       and rule 3 would otherwise choose it.
+    2. BIDS spells a derived variant with a `desc-` entity, so a name without
+       one is the unqualified original (`_cbf` before `_desc-score_cbf`).
+    3. The shortest name breaks any remaining tie.
+
+    Deterministic either way - the previous behaviour was "whichever os.walk
+    reached first", which is stable but arbitrary, and picks a denoised or
+    uncalibrated map as readily as the real one.
+    """
+    name = os.path.basename(f["path"]).lower()
+    return ("calib" not in name, "desc-" in name, len(name), name)
+
+
+def _stream_b_from_derivatives(files: list[dict]) -> dict:
+    """Load the CBF map and tissue maps a pipeline left in the folder.
+
+    Without this the CLI and the website could only ever run Stream A on a
+    derivatives folder: `run_qc` was handed no `cbf` key, so every Stream-B
+    check - QEI, sCoV, SNR, the CBF levels, coverage - returned "needs a CBF
+    map" about a CBF map that was in the folder it had just been given.
+
+    Degrades rather than raises. `load_cbf_inputs` throws on a grid mismatch or
+    a 0-255 segmentation, which is right when a caller named those files
+    explicitly, but here a folder can hold a perfectly good ASL series next to
+    tissue maps still in T1 space. Killing the whole report over that would lose
+    the Stream A findings too, so the reason is recorded and Stream A goes on.
+    """
+    def candidates(role: str) -> list[dict]:
+        return sorted((f for f in files if f["role"] == role), key=_variant_rank)
+
+    def first(role: str) -> str | None:
+        hits = candidates(role)
+        return hits[0]["path"] if hits else None
+
+    cbf_all = candidates("cbf")
+    if not cbf_all:
+        return {}
+    cbf = cbf_all[0]["path"]
+    try:
+        got = load_cbf_inputs(cbf, first("gm"), first("wm"), first("csf"))
+    except ValueError as exc:
+        return {"stream_b_skipped": f"{os.path.basename(cbf)}: {exc}"}
+    if len(cbf_all) > 1:
+        # ASLPrep writes several CBF variants for one subject - the plain map
+        # plus _desc-score_ and _desc-scrub_ denoised versions. Grading whichever
+        # os.walk reached first would report a verdict without ever saying which
+        # map it was about, and the denoised ones score better by construction.
+        got["cbf_variants"] = [os.path.basename(f["path"]) for f in cbf_all]
+    # voxel_mm already describes the ASL acquisition if there was one; the CBF
+    # map is normally on the same grid, and the acquisition is the better source.
+    got.pop("voxel_mm", None)
+    return got
 
 
 # --------------------------------------------------------------------------- #
@@ -335,7 +457,13 @@ def find_oxford_asl(out_dir: str) -> dict:
         return None
 
     return {
-        "cbf": first("perfusion_calib.nii.gz", "perfusion_calib.nii", "*perfusion_calib*"),
+        # The CALIBRATED map first, always. `perfusion.nii.gz` is the same map in
+        # arbitrary units, so it is a last resort rather than an equal
+        # alternative - graded against published mL/100g/min bands it reads far
+        # too low and 3.1.cbf_level FAILs a scan whose only problem is that no
+        # M0 was available to calibrate it.
+        "cbf": first("perfusion_calib.nii.gz", "perfusion_calib.nii",
+                     "*perfusion_calib*", "perfusion.nii.gz", "perfusion.nii"),
         "gm": first("pvgm_inasl.nii.gz", "gm_pv_inasl*", "*pvgm*", "*gm*pv*"),
         "wm": first("pvwm_inasl.nii.gz", "wm_pv_inasl*", "*pvwm*", "*wm*pv*"),
     }
@@ -345,20 +473,30 @@ def find_aslprep(perf_dir: str) -> dict:
     """Locate the CBF map + tissue probability maps inside an ASLPrep
     derivatives `.../perf/` directory. Tissue probsegs may live in the `anat/`
     derivatives and may need resampling into ASL space — verify the result and
-    fall back to explicit paths if needed."""
-    def first(*patterns):
-        for p in patterns:
-            hits = sorted(glob.glob(os.path.join(perf_dir, p)))
-            if hits:
-                return hits[0]
-        return None
+    fall back to explicit paths if needed.
 
-    return {
-        "cbf": first("*_cbf.nii.gz", "*mean*cbf*.nii.gz", "*_cbf.nii"),
-        "gm": first("*label-GM_probseg*", "*GM_probseg*", "*_GM*"),
-        "wm": first("*label-WM_probseg*", "*WM_probseg*", "*_WM*"),
-        "csf": first("*label-CSF_probseg*", "*CSF_probseg*"),
-    }
+    Uses `classify_derivative`, the same vocabulary `load_folder` and the upload
+    page apply, rather than a third private list of glob patterns. The private
+    list had already drifted: it matched `*_cbf.nii.gz` and `*_cbf.nii`, so a
+    real mentor dataset's `..._label-meancbf.nii` matched neither - uncompressed,
+    and "meancbf" with no underscore before "cbf" - and this function returned
+    the three tissue maps with `cbf: None`.
+
+    Where several CBF variants exist, the unqualified one wins; see
+    `_variant_rank`.
+    """
+    found: dict[str, list[dict]] = {}
+    for path in sorted(glob.glob(os.path.join(perf_dir, "*.nii*"))):
+        try:
+            shape = nib.load(path).shape
+        except (OSError, ValueError, nib.filebasedimages.ImageFileError):
+            continue
+        role = classify_derivative(os.path.basename(path), shape=shape)
+        if role:
+            found.setdefault(role, []).append({"path": path})
+    return {role: (sorted(found[role], key=_variant_rank)[0]["path"]
+                   if found.get(role) else None)
+            for role in ("cbf", "gm", "wm", "csf")}
 
 
 # --------------------------------------------------------------------------- #

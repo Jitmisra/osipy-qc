@@ -125,6 +125,68 @@ Example output for `osipy-qc data/Siemens_BS3DPCASL/`:
   ℹ️ 8.2.data_type          INFO     Siemens 3D control/label series (16 volumes)
 ```
 
+### (a2) A folder that holds both — one command, both streams
+
+Point it at a folder of **pipeline output** and it grades the CBF map and the raw
+acquisition together. Nothing needs naming by hand: a quantified CBF map and the
+GM/WM/CSF maps resampled beside it are recognised from their filenames, and a raw
+series in a subfolder is found and used for the motion and control/label checks.
+
+```bash
+osipy-qc path/to/subject/          # cbf + tissue maps + raw/ in one folder
+```
+
+Real output, abridged to the lines that could only come from a folder like this
+(the map from Stream B, the series and the M0 from Stream A):
+
+```
+=== OVERALL: ❌ FAIL ===
+
+  ✅ 1.qei                  PASS     QEI 0.801 (>= 0.55)
+  ✅ 2.1.spatial_cov        PASS     sCoV 38.5% (CBF-contrast)
+  ✅ 2.2.snr                PASS     spatial SNR 2.60
+  🟠 3.1.cbf_level          WARN     GM 37.5 (WARN), WM 24.7 (PASS) [adult bands]
+  ✅ 3.2.gm_wm_ratio        PASS     GM/WM ratio 1.52 (GM brighter than WM)
+  ✅ 4.2.coverage           PASS     99.6% of the GM ROI is covered by CBF data
+  ✅ 5.2.volume_integrity   PASS     12 volumes -> 6 pairs
+  ❌ 5.3.swap               FAIL     label brighter than control (-6.05%) assuming
+                                     even=control - either a genuine control/label
+                                     swap or a label-first acquisition, which are
+                                     indistinguishable without an aslcontext.tsv
+  ✅ 6.2.m0_tr              PASS     TR 6.0s >= 5s (no correction needed)
+                                     [NIfTI header (pixdim[4])]
+  ℹ️ 7.1.motion             INFO     mean DVARS 53.48 (no motion params for FWD)
+
+  coverage: 13 of 15 applicable checks decided; 2 had no input to look at.
+```
+
+That `5.3.swap` FAIL is worth reading carefully, because it is the honest form of
+a verdict this tool cannot reach on its own. Without an `aslcontext.tsv` the even
+volumes are *assumed* to be the controls, and a label-first acquisition looks
+exactly like a swap under that assumption. So the finding is marked
+**provisional**: `--no-strict` softens it to a WARN, and the reason names both
+explanations rather than asserting the bad one.
+
+
+Names recognised as pipeline output: `*cbf*`, `*perfusion*`, `*rbf*` for the map,
+and `*GM*`/`*WM*`/`*CSF*` with a `probseg`/`pv` style name for the tissue maps —
+so ASLPrep's `sub-01_label-GM_probseg.nii.gz` and oxford_asl's `pvgm_inasl.nii.gz`
+both work unchanged. Only 3-D images qualify, which is what keeps a 4-D series out.
+
+Three details worth knowing:
+
+* **The M0 TR is read from the NIfTI header** when no sidecar states one, but only
+  from a 4-D image and only when the header declares its time unit. `pixdim[4]` on
+  a 3-D image is leftover, not a measurement.
+* **If a folder holds several CBF variants** (ASLPrep writes `_cbf` plus
+  `_desc-score_cbf` and `_desc-scrub_cbf`), the unqualified one is graded and
+  `8.2.data_type` names which, because the denoised versions score better by
+  construction.
+* **If the tissue maps are still in T1 space**, Stream B is skipped rather than
+  crashing the run, and `8.2.data_type` says so. Stream A still grades.
+
+The same applies to the web console: drag the folder in and both streams run.
+
 ### (b) CBF-map QC — Stream B (CBF maps produced with ASLPrep)
 
 The pipeline wrote a CBF map per dataset into `output/aslprep/`. Grade each one:

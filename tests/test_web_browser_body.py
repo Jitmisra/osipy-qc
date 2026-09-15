@@ -417,3 +417,57 @@ def test_the_page_offers_every_organs_thresholds_and_masks():
                 'name="kidney__cortex_left"', 'name="placenta__gestational_age_wk"',
                 'name="kidney__pld_or_ti_s"', "function applyOrgan"):
         assert tok in page, tok
+
+
+# --------------------------------------------------------------------------
+# Dropping a folder of PIPELINE OUTPUT, not just raw acquisitions
+# --------------------------------------------------------------------------
+# The per-role boxes cover raw files; the CBF/GM/WM/CSF boxes cover a map the
+# user names one at a time. Neither covers the ordinary case of dragging a whole
+# derivatives folder in, which puts every file into the multi-file field. The
+# loader now recognises the maps there, but the console still decided whether to
+# run Stream B by asking whether the CBF *box* had been filled - so a folder drop
+# came back Stream A only, and nothing in the report said a CBF map had been
+# uploaded and ignored.
+
+def _derivatives_drop(case) -> dict[str, bytes]:
+    """A folder drop the way a pipeline actually names its output."""
+    from osipy_qc.synth import synthetic_control_label
+    return {
+        "sub-01_PCASL3D_label-meancbf.nii.gz": _nifti_bytes(case.cbf),
+        "sub-01_T1w_label-GM_probseg_aslspace.nii.gz": _nifti_bytes(case.gm),
+        "sub-01_T1w_label-WM_probseg_aslspace.nii.gz": _nifti_bytes(case.wm),
+        "sub-01_T1w_label-CSF_probseg_aslspace.nii.gz": _nifti_bytes(case.csf),
+        "PCASL.nii.gz": _nifti_bytes(synthetic_control_label(n_pairs=6)),
+        "M0.nii.gz": _nifti_bytes(np.ones((36, 36, 28)) * 900),
+    }
+
+
+def test_a_dropped_derivatives_folder_is_graded_on_both_streams(clean_case):
+    out = _grade(_browser_body({}, raw=_derivatives_drop(clean_case)))
+    decided = {c["id"]: c["verdict"] for c in out["checks"]
+               if c["verdict"] in ("PASS", "WARN", "FAIL")}
+    for need in ("1.qei", "2.1.spatial_cov", "3.1.cbf_level", "3.2.gm_wm_ratio"):
+        assert need in decided, (
+            f"{need} was not run on a folder drop containing a CBF map; "
+            f"decided: {sorted(decided)}")
+    # and Stream A still ran off the raw series in the same drop
+    assert "5.2.volume_integrity" in decided
+
+
+def test_a_raw_only_drop_is_still_stream_a_only(clean_case, raw_series):
+    """The gate must follow the inputs in BOTH directions. Widening it so a
+    folder drop reaches Stream B must not start asking a raw-only upload for a
+    CBF map it never had."""
+    out = _grade(_browser_body({}, raw={"PCASL.nii.gz": raw_series}))
+    ran = {c["id"] for c in out["checks"]}
+    assert not any(c.startswith(("1.", "2.", "3.")) for c in ran), (
+        f"Stream B checks ran on a raw-only upload: {sorted(ran)}")
+
+
+def test_the_dropped_cbf_map_is_the_one_reported_on(clean_case):
+    """A verdict about "the CBF map" has to be about a named file."""
+    out = _grade(_browser_body({}, raw=_derivatives_drop(clean_case)))
+    qei = next(c for c in out["checks"] if c["id"] == "1.qei")
+    assert qei["verdict"] in ("PASS", "WARN", "FAIL")
+    assert qei["metric"].get("qei") is not None

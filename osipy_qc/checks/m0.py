@@ -37,7 +37,8 @@ def m0_present_check(m0_type: str | None = None, detected: dict | None = None,
 
 
 @register_qc_check("6.2.m0_tr", stream="A", required=True)
-def m0_tr_check(m0_tr_s: float | None = None, cfg: QCConfig = QCConfig(), **_) -> CheckResult:
+def m0_tr_check(m0_tr_s: float | None = None, m0_tr_source: str | None = None,
+                cfg: QCConfig = QCConfig(), **_) -> CheckResult:
     """TR >= 5 s recovers M0 fully. Below that, flag (WARN) and report the
     T1-correction factor 1/(1 - exp(-TR/T1)); never a hard fail."""
     if m0_tr_s is None:
@@ -48,14 +49,22 @@ def m0_tr_check(m0_tr_s: float | None = None, cfg: QCConfig = QCConfig(), **_) -
         return CheckResult("6.2.m0_tr", Verdict.UNKNOWN, metric={"tr_seconds": m0_tr_s},
                            reason=f"M0 TR is {m0_tr_s}, which is not a repetition time - "
                                   "no relaxation correction can be derived from it")
+    # Where the TR came from is part of the finding. A sidecar states it; the
+    # NIfTI header only implies it from pixdim[4], and a reader deciding whether
+    # to trust a relaxation correction needs to know which one they got.
+    src = f" [{m0_tr_source}]" if m0_tr_source else ""
     if m0_tr_s >= cfg.m0_tr_min_s:
         return CheckResult("6.2.m0_tr", Verdict.PASS,
-                           metric={"tr_seconds": m0_tr_s, "correction_factor": 1.0},
-                           reason=f"TR {m0_tr_s:.1f}s >= {cfg.m0_tr_min_s:.0f}s (no correction needed)")
+                           metric={"tr_seconds": m0_tr_s, "correction_factor": 1.0,
+                                   "tr_source": m0_tr_source},
+                           reason=f"TR {m0_tr_s:.1f}s >= {cfg.m0_tr_min_s:.0f}s "
+                                  f"(no correction needed){src}")
     factor = 1.0 / (1.0 - np.exp(-m0_tr_s / cfg.t1_tissue_s))
     return CheckResult("6.2.m0_tr", Verdict.WARN,
-                       metric={"tr_seconds": m0_tr_s, "correction_factor": round(float(factor), 4)},
-                       reason=f"TR {m0_tr_s:.1f}s < {cfg.m0_tr_min_s:.0f}s - correct by x{factor:.3f}")
+                       metric={"tr_seconds": m0_tr_s, "correction_factor": round(float(factor), 4),
+                               "tr_source": m0_tr_source},
+                       reason=f"TR {m0_tr_s:.1f}s < {cfg.m0_tr_min_s:.0f}s - "
+                              f"correct by x{factor:.3f}{src}")
 
 
 @register_qc_check("6.3.m0_no_bs", stream="A", required=True)

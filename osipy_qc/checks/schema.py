@@ -13,6 +13,8 @@ file descriptors so it is unit-testable without touching disk.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 from ..core.config import QCConfig
@@ -70,6 +72,110 @@ def role_vocabulary() -> list[dict]:
             for role, how, tokens in _ROLE_RULES]
 
 
+# --------------------------------------------------------------------------- #
+# Derivative maps (Stream B inputs), a SEPARATE vocabulary from _ROLE_RULES.
+# --------------------------------------------------------------------------- #
+# _ROLE_RULES answers "which acquisition is this?" and only knows asl/m0/t1.
+# A folder of PIPELINE OUTPUT holds neither: a quantified CBF map and the tissue
+# probability maps resampled beside it. Those were invisible to the loader, so
+# pointing the CLI or the website at an ASLPrep derivatives folder - the most
+# standard layout there is - graded nothing and reported fourteen UNKNOWNs.
+#
+# This is deliberately not folded into _ROLE_RULES. `classify_role` is also the
+# upload page's per-role vocabulary and its answers are pinned by tests
+# (perfusion_calib is an "asl" there, and stays one); widening it would move
+# files out from under callers that only speak asl/m0/t1. The two vocabularies
+# are applied in order by the loader instead, derivatives first.
+#
+# Why the tissue patterns are regexes and not substrings: "gm" as a plain
+# substring matches "seGMentation", and "wm" would need the same care. Each
+# tissue token is anchored on a non-letter boundary, with an optional "pv"
+# prefix so oxford_asl's pvgm_inasl / pvwm_inasl still match. That accepts
+# label-GM_probseg, pvgm_inasl, GM_prob and gm.nii.gz, and rejects
+# segmentation.nii.gz.
+_TISSUE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("gm",  r"(?:^|[^a-z])(?:pv)?gm(?:[^a-z]|$)|gr[ea]y[_ -]?matter"),
+    ("wm",  r"(?:^|[^a-z])(?:pv)?wm(?:[^a-z]|$)|white[_ -]?matter"),
+    ("csf", r"(?:^|[^a-z])(?:pv)?csf(?:[^a-z]|$)|cerebrospinal"),
+)
+
+# A quantified perfusion map. `deltam` is absent on purpose: a deltaM is a
+# subtraction, not a CBF map, and grading it against published mL/100g/min bands
+# would fail every scan that produced one.
+_CBF_TOKENS: tuple[str, ...] = ("cbf", "rbf", "perfusion")
+
+
+def spatial_ndim(shape) -> int:
+    """How many dimensions an image really has, ignoring trailing singletons.
+
+    ASLPrep, FSL and SPM all write a 3-D map with a length-1 volume axis, so
+    `sub-01_cbf.nii.gz` arrives as (81, 101, 43, 1). Counting that as 4-D read
+    every one of them as a control/label series and kept them out of Stream B.
+    """
+    dims = list(shape)
+    while len(dims) > 3 and dims[-1] == 1:
+        dims.pop()
+    return len(dims)
+
+
+def classify_derivative(filename: str, shape=None) -> str | None:
+    """Is this a pipeline OUTPUT map? Returns "cbf"/"gm"/"wm"/"csf", else None.
+
+    `shape` is the image's shape when the caller has the header open. A
+    derivative map is 3-D by definition, so a file with real volumes is never
+    one - that is what keeps a raw series named `..._cbf_series.nii.gz` out of
+    Stream B. A trailing length-1 axis does not count as a volume; see
+    `spatial_ndim`. With `shape` omitted the check is by name only.
+
+    Tissue wins over CBF, because `..._label-GM_probseg_aslspace.nii.gz` carries
+    "asl" in its name and a CSF map could otherwise be read as anything.
+    """
+    if shape is not None and spatial_ndim(shape) != 3:
+        return None
+    name = filename.lower()
+    for tissue, pattern in _TISSUE_PATTERNS:
+        if re.search(pattern, name):
+            return tissue
+    if any(t in name for t in _CBF_TOKENS):
+        return "cbf"
+    return None
+
+
+#: Names a reader recognises, for each derivative rule. These are ILLUSTRATIONS
+#: shown by the upload page; the regex above is what actually runs, in both
+#: Python and the page's JS. `test_every_advertised_example_really_matches`
+#: asserts each one still classifies the way it is advertised, so the page
+#: cannot end up promising a name the loader does not handle - which is the
+#: drift `role_vocabulary` was created to stop.
+_DERIVATIVE_EXAMPLES: dict[str, tuple[str, ...]] = {
+    "gm":  ("label-GM_probseg", "pvgm_inasl", "gm"),
+    "wm":  ("label-WM_probseg", "pvwm_inasl", "wm"),
+    "csf": ("label-CSF_probseg", "csf"),
+    "cbf": ("sub-01_cbf", "label-meancbf", "perfusion_calib"),
+}
+
+
+def derivative_vocabulary() -> list[dict]:
+    """`classify_derivative`'s rules as data, so the upload page can list the
+    same names it actually applies - the reason `role_vocabulary` exists.
+
+    `pattern` is what runs (it is valid in both Python and JavaScript, so the
+    page applies the identical rule rather than a hand-written copy of it).
+    `examples` is what a reader is shown.
+
+    One thing the page cannot reproduce: `classify_derivative` also requires the
+    image to be 3-D, and the browser has not read the header. So the page can
+    say "CBF map" about a 4-D file the server will treat as an ASL series. The
+    disclosure says so rather than leaving the reader to discover it.
+    """
+    return ([{"role": t, "how": "matches", "pattern": pat,
+              "examples": list(_DERIVATIVE_EXAMPLES[t])}
+             for t, pat in _TISSUE_PATTERNS]
+            + [{"role": "cbf", "how": "matches",
+                "pattern": "|".join(_CBF_TOKENS),
+                "examples": list(_DERIVATIVE_EXAMPLES["cbf"])}])
+
+
 def guess_vendor(text: str) -> str:
     t = text.lower()
     # 'siemens'/'philips' are long and safe as substrings (and often concatenated,
@@ -103,23 +209,44 @@ def guess_background_suppression(text: str):
     return None  # unknown, never a confident False without metadata
 
 
+def primary_asl(asl_files: list[dict]) -> dict | None:
+    """Which of several ASL files is THE acquisition: a 4-D series if there is one.
+
+    Order used to decide this, and os.walk puts a folder's own files before its
+    subdirectories. So a derivatives layout with the CBF map at the top and
+    `raw/ASL.nii.gz` underneath had the 3-D map answer for the series: the
+    structure came back "pre-subtracted deltaM", `asl_4d` was never loaded, and
+    5.2 and 5.3 reported "no control/label pairs" about a 12-volume series that
+    was sitting in the folder. A 4-D file is the one with pairs in it.
+    """
+    if not asl_files:
+        return None
+    return next((f for f in asl_files if spatial_ndim(f["shape"]) == 4), asl_files[0])
+
+
 def detect_dataset(files: list[dict], context: str = "") -> dict:
     """files: list of {"name": str, "shape": tuple, "voxel_mm": tuple(optional)}.
     `context` is extra text to mine (e.g. the folder name, where the vendor often lives)."""
-    roles = {"asl": [], "m0": [], "t1": [], "other": []}
+    roles: dict[str, list[dict]] = {"asl": [], "m0": [], "t1": [], "other": []}
     for f in files:
         # a caller that has already RESOLVED the role (e.g. the user put the file
         # in a per-role box) passes it through; only fall back to the filename
         role = f.get("role") or classify_role(f["name"])
-        roles[role].append(f)
+        # setdefault, not roles[role]: the loader now also labels derivative maps
+        # ("cbf"/"gm"/"wm"/"csf"), and a fixed four-key dict raised KeyError on
+        # the first folder that contained one.
+        roles.setdefault(role, []).append(f)
 
     context = context + " " + " ".join(f["name"] for f in files)
-    asl = roles["asl"][0] if roles["asl"] else None
+    asl = primary_asl(roles["asl"])
     slice_mm = asl.get("voxel_mm", (None, None, None))[2] if asl and "voxel_mm" in asl else None
 
     if asl is None:
         structure, n_vol = "unknown", 0
-    elif len(asl["shape"]) == 3:
+    elif spatial_ndim(asl["shape"]) == 3:
+        # spatial_ndim, not len(): a map written as (x, y, z, 1) is a single
+        # subtracted volume, and calling it a "control/label series (1 volumes)"
+        # sent 5.2 looking for pairs that cannot exist.
         structure, n_vol = "pre-subtracted deltaM", 1
     else:
         n_vol = asl["shape"][3]
@@ -143,7 +270,8 @@ def detect_dataset(files: list[dict], context: str = "") -> dict:
 
 @register_qc_check("8.2.data_type", stream="A", required=False)
 def data_type_check(files=None, context: str = "", detected: dict | None = None,
-                    **_) -> CheckResult:
+                    stream_b_skipped: str | None = None,
+                    cbf_variants: list | None = None, **_) -> CheckResult:
     """Routing/INFO check: classify the dataset so later checks can be gated.
 
     Prefers the `detected` the loader already built, because that one has had any
@@ -160,9 +288,21 @@ def data_type_check(files=None, context: str = "", detected: dict | None = None,
     if not det:
         return CheckResult("8.2.data_type", Verdict.UNKNOWN, reason="no files to inspect")
     src = det.get("source", "inferred")
-    return CheckResult("8.2.data_type", Verdict.INFO, metric=det,
-                       reason=f"{det.get('vendor', 'unknown')} {det.get('readout', 'unknown')} "
-                              f"{det.get('structure', 'unknown')} ({src})")
+    why = (f"{det.get('vendor', 'unknown')} {det.get('readout', 'unknown')} "
+           f"{det.get('structure', 'unknown')} ({src})")
+    if stream_b_skipped:
+        # The loader found a CBF map in the folder and could not use it. Without
+        # this line the Stream-B checks all report "needs a CBF map" about a map
+        # that was right there, and the reader has no way to learn why.
+        det = {**det, "stream_b_skipped": stream_b_skipped}
+        why += f" - CBF map found but not graded: {stream_b_skipped}"
+    if cbf_variants and len(cbf_variants) > 1:
+        # A verdict about "the CBF map" is meaningless in a folder holding four
+        # of them, so the one that was graded is named in the report itself.
+        det = {**det, "cbf_variants": list(cbf_variants)}
+        why += (f" - {len(cbf_variants)} CBF maps in this folder, graded "
+                f"{cbf_variants[0]} (others: {', '.join(cbf_variants[1:])})")
+    return CheckResult("8.2.data_type", Verdict.INFO, metric=det, reason=why)
 
 
 # --------------------------------------------------------------------------- #
@@ -295,9 +435,11 @@ def swap_check(asl_4d=None, background_suppression=None, structure=None,
                                reason="aslcontext.tsv lists no control/label volumes")
         ctrl_slab, label_slab = arr[..., ctrl_idx], arr[..., label_idx]
         assumption = "volume order from aslcontext.tsv"
+        stated = True
     else:
         ctrl_slab, label_slab = arr[..., 0::2], arr[..., 1::2]   # even=control
         assumption = "even=control (no aslcontext.tsv); BS assumed off"
+        stated = False
     if not np.any(np.isfinite(ctrl_slab)) or not np.any(np.isfinite(label_slab)):
         return CheckResult("5.3.swap", Verdict.UNKNOWN,
                            reason="control/label volumes are entirely non-finite (all-NaN?)")
@@ -310,5 +452,25 @@ def swap_check(asl_4d=None, background_suppression=None, structure=None,
     if ctrl >= label:
         return CheckResult("5.3.swap", Verdict.PASS, metric=metric,
                            reason=f"control brighter than label ({rel*100:+.2f}%)")
-    return CheckResult("5.3.swap", Verdict.FAIL, metric=metric,
-                       reason=f"label brighter than control ({rel*100:+.2f}%) - likely swap")
+    if stated:
+        # aslcontext.tsv named which volumes are control. They are the darker
+        # ones. That is evidence, not an inference, so it is a hard FAIL.
+        return CheckResult("5.3.swap", Verdict.FAIL, metric=metric,
+                           reason=f"label brighter than control ({rel*100:+.2f}%) - "
+                                  "likely swap (volume order from aslcontext.tsv)")
+    # No aslcontext.tsv, so even=control was ASSUMED - and a label-first
+    # acquisition is indistinguishable from a swap under that assumption. The
+    # comment above already calls label-first "perfectly valid"; grading it a
+    # hard FAIL anyway presents an assumption as evidence.
+    #
+    # Found on a real mentor dataset: all six pairs had the odd volume brighter
+    # by 15-17%, which read as a confident "likely swap" on a scan whose own CBF
+    # map is positive and well formed (QEI 0.80, GM 37.5 mL/100g/min). Whatever
+    # produced that map read the order correctly; only this check could not.
+    # So: provisional, and the reason names both explanations.
+    return CheckResult(
+        "5.3.swap", Verdict.FAIL if cfg.strict else Verdict.WARN, metric=metric,
+        provisional=True,
+        reason=f"label brighter than control ({rel*100:+.2f}%) assuming even=control - "
+               "either a genuine control/label swap or a label-first acquisition, "
+               "which are indistinguishable without an aslcontext.tsv")

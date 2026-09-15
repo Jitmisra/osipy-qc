@@ -229,11 +229,21 @@ _ROLE_LABELS = {
     "m0": "M0",
     "asl": "ASL series",
     "t1": "structural",
+    # Pipeline OUTPUT. These have no per-role box because there is nothing to
+    # override - they are what the CBF-map checks read, and a file either is a
+    # CBF map or is not. Labelling them anyway keeps the page honest: before
+    # this the page told a reader that meancbf.nii was an "ASL series", because
+    # "cbf" is one of the ASL tokens, while the server graded it as a CBF map.
+    "cbf": "CBF map",
+    "gm": "GM tissue map",
+    "wm": "WM tissue map",
+    "csf": "CSF tissue map",
     "other": "name unclear — use the boxes below",
 }
 
 #: how a rule matches, in the reader's words
-_ROLE_MATCH = {"contains": "name contains", "starts": "name starts with"}
+_ROLE_MATCH = {"contains": "name contains", "starts": "name starts with",
+               "matches": "e.g."}
 
 
 def _role_rules() -> tuple[str, str, str]:
@@ -248,12 +258,18 @@ def _role_rules() -> tuple[str, str, str]:
     """
     import json as _json
 
-    from .checks.schema import role_vocabulary
+    from .checks.schema import derivative_vocabulary, role_vocabulary
 
-    vocab = role_vocabulary()
+    # Derivatives FIRST, matching the order load_folder applies them in. Their
+    # names collide with the acquisition tokens - a CBF map called
+    # `..._PCASL3D_label-meancbf.nii` contains "pcasl" - so a page that walked
+    # the acquisition table first would label them the way the loader used to
+    # misfile them.
+    vocab = derivative_vocabulary() + role_vocabulary()
     rows = "".join(
         f'<b>{esc(_ROLE_LABELS[r["role"]])}</b>'
-        f'<span>{esc(_ROLE_MATCH[r["how"]])} <code>{esc(", ".join(r["tokens"]))}</code></span>'
+        f'<span>{esc(_ROLE_MATCH[r["how"]])} '
+        f'<code>{esc(", ".join(r.get("examples") or r["tokens"]))}</code></span>'
         for r in vocab
     )
     disclosure = (
@@ -265,7 +281,11 @@ def _role_rules() -> tuple[str, str, str]:
         '<code>sub-01_T1w.nii.gz</code> &mdash; and BIDS is the naming to prefer. '
         'This list is a convenience and is necessarily incomplete: a name that is not '
         'here is not a problem, put the file in a box above and its name is ignored '
-        'entirely.</p>'
+        'entirely. The first four rows are <b>pipeline output</b> &mdash; a quantified '
+        'CBF map and tissue maps already resampled into ASL space &mdash; which is what '
+        'the CBF-map checks read. Those rows also require the image to be 3-D, which '
+        'this page cannot see before uploading, so a 4-D file named like a CBF map is '
+        'labelled here as one and graded as an ASL series.</p>'
         f'<div class="names">{rows}</div></details>'
     )
     return _json.dumps(vocab), _json.dumps(_ROLE_LABELS), disclosure
@@ -651,6 +671,13 @@ def _upload_page(error: str = "") -> str:
     n = n.toLowerCase();
     for(var i=0;i<ROLES.length;i++){{
       var r = ROLES[i];
+      // 'matches' carries the SAME regex source classify_derivative compiles -
+      // the patterns are written to be valid in both languages - so the page
+      // cannot drift from the loader the way the hand-written copy did.
+      if(r.how === 'matches'){{
+        if(new RegExp(r.pattern).test(n)) return LABELS[r.role];
+        continue;
+      }}
       for(var j=0;j<r.tokens.length;j++){{
         var t = r.tokens[j];
         if(r.how === 'starts' ? n.indexOf(t) === 0 : n.indexOf(t) >= 0) return LABELS[r.role];
@@ -1092,8 +1119,17 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             if organ == "placenta" and inputs.get("m0") is None and inputs.get("cbf") is not None:
                 pass          # an M0 is a separate upload; never derived from the map
             inputs.update(_organ_inputs(organ, fields, tmp, inputs))
+        # Whether Stream B runs follows whether a perfusion map was FOUND, not
+        # whether the dedicated box was filled. Dropping a whole derivatives
+        # folder on the page put the CBF map in the multi-file field, where
+        # load_folder now recognises it - but this gate still asked about the
+        # box, so the Stream-B checks were excluded from the run entirely and
+        # the report came back Stream A only, with no hint that a CBF map had
+        # been uploaded and ignored.
+        map_key = {"brain": "cbf", "kidney": "rbf_map", "placenta": "perfusion_map"}[organ]
+        has_map = bool(paths["cbf"]) or inputs.get(map_key) is not None
         report = run_qc(inputs, cfg=cfg,
-                        checks=_checks_for(bool(paths["cbf"]), saved_raw, organ))
+                        checks=_checks_for(has_map, saved_raw, organ))
 
         from .api import subject_payload
         from .batch import Subject
