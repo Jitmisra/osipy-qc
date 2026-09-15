@@ -22,6 +22,7 @@ These tests pin each of those separately, because they fail separately.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import nibabel as nib
@@ -35,7 +36,13 @@ from osipy_qc.core.config import QCConfig
 from osipy_qc.io import _tr_from_header, _variant_rank, load_folder
 from osipy_qc.report import run_qc
 
-MENTOR = pathlib.Path("/Users/agnik/Desktop/gsoc-osipi/qcdata/brain/Agnik_Data")
+#: The mentor-supplied dataset this whole file was found on. Resolved relative to
+#: the checkout, or from OSIPY_MENTOR_DATA, rather than hard-coded to one machine's
+#: home directory - the test below skips cleanly wherever the data is absent, which
+#: is everywhere but the machine it was sent to.
+MENTOR = pathlib.Path(os.environ.get("OSIPY_MENTOR_DATA")
+                      or pathlib.Path(__file__).resolve().parent.parent.parent
+                      / "qcdata" / "brain" / "Agnik_Data")
 
 
 # --------------------------------------------------------------------------- #
