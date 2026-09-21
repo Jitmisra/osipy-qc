@@ -455,5 +455,48 @@ score when more than 30% of the brain sits at the clip bound, pointing at
 `3.1.cbf_level`. A number computed from a flattened volume is not a quality
 measurement.
 
+### And why it refuses empty ones
+
+The mirror image of the same problem. The network answers whatever it is asked,
+including when it is asked about nothing, and the answer looks like every other
+answer. Measured against this model:
+
+| what it was given | what it returned |
+|---|---|
+| an all-zero volume | **0.109** |
+| a flat constant volume (every voxel 5) | **0.242** |
+| a 1%-sparse volume | **0.019** |
+
+Not zero, not an error, and not even ordered by how much signal is present. Two of
+this project's own oxford_asl outputs came out 97.5% and 88.3% empty inside the
+brain mask and scored 0.259 and 0.104 — numbers a reader would take for a
+poor-but-real quality estimate rather than for the absence of one.
+
+So the check also measures how much of the **tissue ROI** carries data, and
+reports UNKNOWN below half, pointing at `4.2.coverage`. The ROI is GM|WM at
+`tissue_thresh` — deliberately the same denominator `4.2.coverage` uses, since
+that is the check the refusal sends you to. "Carries data" is a magnitude floor
+relative to the map's own scale, not `!= 0`, so a pipeline that pads with `1e-9`
+instead of an exact zero cannot slip past it.
+
+**Emptiness is not badness.** A genuinely terrible map still has signal
+everywhere — the synthetic `garbage` case covers 100% of its ROI — and is still
+scored. This guard fires only when there is nothing to look at.
+
+The limit comes from the gap in the measured data, not from a round number:
+
+| map | covered |
+|---|---|
+| a good real GE scan | 0.997 |
+| the same map tissue-masked by its pipeline | 0.997 |
+| synthetic clean / borderline / garbage | 1.000 |
+| an oxford_asl output that came out empty | **0.104** |
+| another that came out emptier | **0.020** |
+| an all-zero or uniformly-`1e-9` volume | **0.000** |
+
+Without tissue maps the guard is skipped rather than answered wrongly —
+`4.2.coverage` is silent without them too, so a refusal would point you at a
+check that says nothing.
+
 Run both indices rather than choosing between them. They fail differently, which is
 the point.

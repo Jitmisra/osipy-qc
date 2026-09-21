@@ -18,7 +18,8 @@ import nibabel as nib
 import numpy as np
 import pytest
 
-from osipy_qc.checks.qei_net import (_CLIP, _SATURATION_LIMIT, _brain_from_tissue,
+from osipy_qc.checks.qei_net import (_CLIP, _MIN_COVERAGE, _SATURATION_LIMIT,
+                                     _brain_from_tissue, _covered_fraction,
                                      _saturated_fraction, qei_net_check)
 from osipy_qc.core import Verdict
 from osipy_qc.core.config import QCConfig
@@ -164,3 +165,136 @@ def test_it_scores_a_real_map_and_records_which_model_did_it(tmp_path):
     assert 0.0 <= r.metric["qei_net"] <= 1.0
     assert r.metric["model"] != "unknown"          # the fingerprint must be real
     assert "not graded" in r.reason                # never decides a verdict
+
+
+# --------------------------------------------------------------------------- #
+# the opposite failure: a map with nothing in it
+# --------------------------------------------------------------------------- #
+def test_an_empty_map_is_refused_rather_than_scored(monkeypatch):
+    """The mirror of the saturation guard, and the same underlying problem.
+
+    The network answers whatever it is asked, including when it is asked about
+    nothing, and the answer looks like every other answer. Measured against this
+    model: an all-zero volume scores 0.109, a flat constant volume 0.242, a
+    1%-sparse volume 0.019 - not zero, not an error, and not even ordered by how
+    much signal is present.
+
+    Two of this project's own oxford_asl outputs came out 97.5% and 88.3% empty
+    inside the brain mask and scored 0.259 and 0.104, which a reader would take
+    for a poor-but-real quality estimate rather than for the absence of one.
+    """
+    monkeypatch.setenv("OSIPY_QEI_NET_PYTHON", sys.executable)
+    monkeypatch.setenv("OSIPY_QEI_NET_SCRIPT", __file__)     # exists, never reached
+    shape = (20, 20, 12)
+    cbf = np.zeros(shape)
+    cbf[:, :2] = 45.0                                        # ~10% covered
+    r = qei_net_check(cbf=cbf, gm=np.ones(shape), affine=np.eye(4), cfg=CFG)
+    assert r.verdict is Verdict.UNKNOWN
+    assert "grey and white matter carries" in r.reason and "4.2.coverage" in r.reason
+    assert r.metric["covered_fraction"] < _MIN_COVERAGE
+
+
+def test_a_totally_blank_map_is_refused(monkeypatch):
+    monkeypatch.setenv("OSIPY_QEI_NET_PYTHON", sys.executable)
+    monkeypatch.setenv("OSIPY_QEI_NET_SCRIPT", __file__)
+    shape = (12, 12, 8)
+    r = qei_net_check(cbf=np.zeros(shape), gm=np.ones(shape), affine=np.eye(4), cfg=CFG)
+    assert r.verdict is Verdict.UNKNOWN
+    assert r.metric["covered_fraction"] == 0.0
+
+
+def test_a_bad_map_is_still_scored_because_empty_is_not_the_same_as_bad(monkeypatch):
+    """The guard must not become a way to duck grading poor data.
+
+    A genuinely terrible map still has signal everywhere - the synthetic
+    "garbage" case covers 100% of its mask - and QEI-Net is still asked about it.
+    Only the absence of a measurement is refused.
+    """
+    from osipy_qc.synth import synthetic_case
+    c = synthetic_case(quality="garbage", seed=0)
+    assert _covered_fraction(c.cbf, c.gm, c.wm, CFG) > _MIN_COVERAGE
+    monkeypatch.setenv("OSIPY_QEI_NET_PYTHON", sys.executable)
+    monkeypatch.setenv("OSIPY_QEI_NET_SCRIPT", __file__)
+    r = qei_net_check(cbf=c.cbf, gm=c.gm, wm=c.wm, csf=c.csf, affine=np.eye(4), cfg=CFG)
+    assert "carries data" not in r.reason, "the emptiness guard fired on a map with data"
+
+
+def test_the_coverage_limit_sits_in_the_measured_gap():
+    """Not a round number picked by feel.
+
+    Every map with real signal to hand covers at least 74% of its brain mask;
+    both maps that came out near-empty cover 11.7% and 2.5%. The limit has to sit
+    between those, with room on each side.
+    """
+    assert 0.20 < _MIN_COVERAGE < 0.70
+
+
+def test_coverage_cannot_be_measured_without_tissue_maps():
+    """4.2.coverage is silent without them too, so a refusal here would point
+    the reader at a check that says nothing. The guard is skipped instead."""
+    import math
+    assert math.isnan(_covered_fraction(np.zeros((6, 6, 4)), None, None, CFG))
+    # and a probability map on the wrong grid cannot answer it either
+    assert math.isnan(_covered_fraction(np.zeros((6, 6, 4)), np.ones((8, 8, 4)), None, CFG))
+
+
+def test_the_guard_measures_the_same_roi_as_the_check_it_cites():
+    """It first measured (gm+wm+csf) > 0.5, and the two answered different
+    questions.
+
+    On a good real GE map whose CBF had been tissue-masked by its own pipeline,
+    the guard read 55% while 4.2.coverage read 99.6% and PASSed - so it sat one
+    point from refusing a perfectly good map for not measuring blood flow in
+    cerebrospinal fluid, and would have sent the reader to a check reporting
+    that nothing was wrong. CSF holding no perfusion is not a missing
+    measurement.
+    """
+    shape = (12, 12, 8)
+    gm = np.zeros(shape); gm[:, :4] = 0.9
+    wm = np.zeros(shape); wm[:, 4:7] = 0.9
+    csf = np.zeros(shape); csf[:, 7:] = 0.9          # 40% of a gm+wm+csf mask
+    cbf = np.zeros(shape)
+    cbf[(gm > 0.7) | (wm > 0.7)] = 45.0              # perfusion exactly where it belongs
+    assert _covered_fraction(cbf, gm, wm, CFG) == pytest.approx(1.0)
+    # the old denominator would have called this map 60% covered
+    brain = (gm + wm + csf) > 0.5
+    assert np.mean(cbf[brain] != 0) < 0.7
+
+
+def test_an_epsilon_cannot_defeat_the_guard():
+    """`!= 0` was not enough. A pipeline padding with 1e-9 rather than an exact
+    zero passed it outright, and the two near-empty maps it was written for
+    scored exactly as before."""
+    shape = (12, 12, 8)
+    gm = np.ones(shape)
+    cbf = np.full(shape, 1e-9)
+    cbf[:, :1] = 45.0                                 # ~8% real signal
+    assert _covered_fraction(cbf, gm, None, CFG) < _MIN_COVERAGE
+    # and a volume that is uniformly tiny carries nothing at all
+    assert _covered_fraction(np.full(shape, 1e-9), gm, None, CFG) == 0.0
+    # while a real map is unaffected by the floor
+    assert _covered_fraction(np.full(shape, 45.0), gm, None, CFG) == pytest.approx(1.0)
+
+
+def test_the_floor_is_relative_so_it_survives_a_change_of_units():
+    """Units are not declared for brain, so a fixed physical floor would be
+    wrong for a map in %M0 or in arbitrary units."""
+    from osipy_qc.checks.qei_net import _ABSOLUTE_FLOOR, _data_floor
+    # an all-zero map floors absolutely, so nothing in it counts as data
+    assert _data_floor(np.array([0.0, 0.0])) == _ABSOLUTE_FLOOR
+    # only a map with NO finite value at all has nothing to scale against
+    assert _data_floor(np.array([np.nan, np.inf])) == 0.0
+    assert _data_floor(np.full(100, 1e-9)) == _ABSOLUTE_FLOOR   # relative alone is blind
+    assert _data_floor(np.linspace(0, 70, 100)) > _ABSOLUTE_FLOOR
+    # a map scaled to ~1 (%M0 / a.u.) still admits its own real values
+    small = np.linspace(0, 1.0, 100)
+    assert _covered_fraction(small.reshape(10, 10, 1), np.ones((10, 10, 1)), None, CFG) > 0.9
+
+
+def test_a_saturated_map_is_still_reported_as_saturated_not_as_empty(monkeypatch):
+    """Both guards can look at the same map; the more specific diagnosis wins."""
+    monkeypatch.setenv("OSIPY_QEI_NET_PYTHON", sys.executable)
+    monkeypatch.setenv("OSIPY_QEI_NET_SCRIPT", __file__)
+    cbf = _plausible_cbf(level=2700.0)
+    r = qei_net_check(cbf=cbf, gm=np.ones(cbf.shape), affine=np.eye(4), cfg=CFG)
+    assert "clip bound" in r.reason and "carries data" not in r.reason

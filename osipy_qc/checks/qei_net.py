@@ -40,6 +40,38 @@ So the check measures the saturated fraction first and refuses to report a
 score when the map is mostly pinned. A number computed from a saturated volume
 is not a quality measurement, and passing it through would launder a broken
 scan into a middling score.
+
+Why an emptiness guard as well
+------------------------------
+The mirror image of the same problem. The network answers whatever it is asked,
+including when it is asked about nothing, and the answer looks like every other
+answer. Measured against this model:
+
+    an all-zero volume                    -> 0.109
+    a flat constant volume (every voxel 5) -> 0.242
+    a 1%-sparse volume                     -> 0.019
+
+Not zero, not an error, and not even ordered by how much signal is present. Two
+of this project's own oxford_asl outputs came out 98% and 90% empty inside the
+grey and white matter and scored 0.259 and 0.104 - numbers a reader would take
+for a poor-but-real quality estimate rather than for the absence of one.
+
+So the check also measures how much of the TISSUE ROI carries data, and refuses
+below half. Two details of that sentence are load-bearing, and both were got
+wrong first:
+
+  * the ROI is GM|WM at `cfg.tissue_thresh`, the same denominator 4.2.coverage
+    uses, because the refusal tells the reader to go and look at that check. A
+    (gm+wm+csf) mask answered a different question - on a good real map whose
+    CBF had been tissue-masked it read 55% while 4.2.coverage read 99.6% and
+    PASSed, one point from refusing a sound scan for not perfusing CSF.
+  * "carries data" is a magnitude floor, not `!= 0`. A pipeline padding with
+    1e-9 instead of an exact zero defeated the first version outright: both
+    near-empty maps passed and scored exactly as before.
+
+Emptiness is NOT badness: a genuinely terrible map still has signal everywhere
+(the synthetic "garbage" case covers 100% of its ROI) and is still scored. This
+guard fires only when there is nothing to look at.
 """
 
 from __future__ import annotations
@@ -66,6 +98,27 @@ _CLIP = 100.0
 # judgement about when a measurement stops being a measurement, not a quality
 # threshold, and it never decides a verdict either way.
 _SATURATION_LIMIT = 0.30
+
+# Below this share of the TISSUE ROI carrying data, there is not enough map left
+# to score. Uncalibrated, like the saturation limit: a judgement about when a
+# measurement stops being a measurement, and it never decides a verdict either.
+#
+# Set from the gap in the measured data rather than picked round. Measured with
+# `_covered_fraction` as it ships, on GM|WM at the default tissue threshold:
+#
+#     a good real GE map                        0.997
+#     the same map tissue-masked by a pipeline  0.997
+#     synthetic clean / borderline / garbage    1.000
+#     ------------------------------------------------
+#     oxford_asl output that came out empty     0.104
+#     another that came out emptier             0.020
+#     an all-zero or uniformly-1e-9 volume      0.000
+#
+# Half sits in the middle of that gap, with room on both sides. An earlier
+# version of this constant was justified against a (gm+wm+csf) mask instead, and
+# those numbers ran 0.853 down to 0.551 for the same good map - a single point
+# of margin, because CSF carries no perfusion and was being counted as missing.
+_MIN_COVERAGE = 0.50
 
 _TIMEOUT_S = 900
 
@@ -111,6 +164,67 @@ def _saturated_fraction(cbf: np.ndarray, brain: np.ndarray | None) -> float:
     if vals.size == 0:
         return float("nan")
     return float(np.mean(np.abs(vals) >= _CLIP))
+
+
+#: A voxel below this magnitude is not a measurement in any unit a CBF map is
+#: written in - mL/100g/min, %M0, or an arbitrary scale normalised near 1. It
+#: exists because a purely relative floor cannot see a map that is uniformly
+#: tiny: scale it by its own 99th percentile and a volume of 1e-9 looks exactly
+#: like a volume of 45.
+_ABSOLUTE_FLOOR = 1e-6
+
+
+def _data_floor(vals: np.ndarray) -> float:
+    """Below this magnitude a voxel is padding, not perfusion.
+
+    Relative to the map's own robust scale, because the units are not declared
+    for brain and a fixed physical floor would be wrong for a map in %M0 or in
+    arbitrary units. Floored absolutely, because a relative test alone is blind
+    to a uniformly tiny volume.
+    """
+    finite = vals[np.isfinite(vals)]
+    if finite.size == 0:
+        return 0.0
+    scale = float(np.percentile(np.abs(finite), 99))
+    return max(_ABSOLUTE_FLOOR, 1e-4 * scale)
+
+
+def _covered_fraction(cbf, gm, wm, cfg: QCConfig) -> float:
+    """Share of the TISSUE ROI that carries an actual measurement.
+
+    The ROI is GM|WM at `cfg.tissue_thresh` - deliberately the same denominator
+    `4.2.coverage` uses, because this guard's refusal tells the reader to go and
+    look at that check. It first measured (gm+wm+csf) > 0.5 instead, and the two
+    answered different questions: on a good real GE map whose CBF had been
+    tissue-masked by its pipeline, this said 55% while 4.2.coverage said 99.6%
+    and PASSed. 98% of the voxels it counted as missing were CSF, where
+    perfusion is legitimately absent - so the guard was one point from refusing
+    a perfectly good map for not measuring blood flow in cerebrospinal fluid,
+    and would have sent the reader to a check reporting that nothing was wrong.
+
+    NaN when there is no tissue ROI to measure against, and the caller then skips
+    the guard: 4.2.coverage is silent in that case too, so there would be nothing
+    to point at.
+    """
+    from ..utils.masks import clean_nonfinite, threshold_prob
+
+    parts = [x for x in (gm, wm) if x is not None]
+    if not parts:
+        return float("nan")
+    arr = clean_nonfinite(np.asarray(cbf, dtype=float))
+    roi = np.zeros(arr.shape, dtype=bool)
+    for prob in parts:
+        prob = np.asarray(prob, dtype=float)
+        if prob.shape != arr.shape:
+            return float("nan")
+        roi |= threshold_prob(prob, getattr(cfg, "tissue_thresh", 0.7))
+    if not roi.any():
+        return float("nan")
+    vals = arr[roi]
+    # `!= 0` was not enough. A pipeline that pads with 1e-9 rather than an exact
+    # zero defeated it outright: the two near-empty maps this guard was written
+    # for passed it and scored exactly as before.
+    return float(np.mean(np.abs(vals) > _data_floor(vals)))
 
 
 def _brain_from_tissue(gm, wm, csf) -> np.ndarray | None:
@@ -174,6 +288,17 @@ def qei_net_check(cbf=None, gm=None, wm=None, csf=None, cbf_path=None, affine=No
                        "clip bound, so QEI-Net's normalisation would flatten this "
                        "map before scoring it - check the calibration first "
                        "(3.1.cbf_level)")
+
+        # ...and refuse the opposite failure too: a map with nothing in it.
+        covered = _covered_fraction(cbf, gm, wm, cfg)
+        if np.isfinite(covered) and covered < _MIN_COVERAGE:
+            return CheckResult(
+                "1.1.qei_net", Verdict.UNKNOWN,
+                metric={"covered_fraction": round(covered, 4),
+                        "coverage_limit": _MIN_COVERAGE},
+                reason=f"only {covered:.1%} of the grey and white matter carries "
+                       "data, so there is not enough map here for QEI-Net to score - "
+                       "check the quantification and the coverage first (4.2.coverage)")
 
     with tempfile.TemporaryDirectory(prefix="osipy-qeinet-") as tmp:
         tmpdir = pathlib.Path(tmp)
