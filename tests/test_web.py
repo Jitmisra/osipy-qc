@@ -107,8 +107,11 @@ def test_upload_page_states_the_minimum_inputs():
     which."""
     page = _upload_page()
     assert 'name="cbf"' in page and 'name="files"' in page
-    assert "Minimum inputs" in page
-    assert page.count("one of the two") == 2, "both alternatives must be marked as such"
+    # The fact still has to be on the page; it no longer needs a 49-word block to
+    # say it. The lede states it once and the two pills mark which inputs it is
+    # about - the block that used to repeat all of this underneath was deleted.
+    assert "one is enough" in page
+    assert page.count("either one") == 2, "both alternatives must be marked as such"
     for optional in ("gm", "wm", "csf"):
         assert f'name="{optional}"' in page
 

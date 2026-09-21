@@ -214,7 +214,7 @@ class Subject:
 # --------------------------------------------------------------------------- #
 # building a batch
 # --------------------------------------------------------------------------- #
-def subject_inputs(subject_dir: str) -> dict | None:
+def subject_inputs(subject_dir: str, organ: str = "brain") -> dict | None:
     """Everything gradeable inside one subject folder, or None if nothing is.
 
     This used to carry its own glob patterns - a fourth private copy of the
@@ -230,21 +230,33 @@ def subject_inputs(subject_dir: str) -> dict | None:
     rest of the package applies, and a subject folder that also holds its raw
     acquisition gets Stream A graded too, instead of only the CBF map.
     """
-    from .io import load_folder
+    from .io import load_folder, load_organ_folder
 
-    inputs = load_folder(subject_dir)
-    return inputs if _is_subject(inputs) else None
+    inputs = (load_folder(subject_dir) if organ == "brain"
+              else load_organ_folder(subject_dir, organ))
+    return inputs if _is_subject(inputs, organ) else None
 
 
-def _is_subject(inputs: dict) -> bool:
+def _is_subject(inputs: dict, organ: str = "brain") -> bool:
     """Is there a scan here, or only supporting files?
 
-    A CBF map or an ASL series. Deliberately NOT "any recognised file": a BIDS
-    subject is laid out `sub-01/anat/` + `sub-01/perf/`, and counting a lone T1
-    as a subject would split one person into two rows of a cohort ledger - and,
-    worse, make the upload console read a single BIDS subject as a two-subject
-    cohort.
+    A perfusion map or an acquisition. Deliberately NOT "any recognised file": a
+    BIDS subject is laid out `sub-01/anat/` + `sub-01/perf/`, and counting a lone
+    T1 as a subject would split one person into two rows of a cohort ledger -
+    and, worse, make the upload console read a single BIDS subject as a
+    two-subject cohort. For kidney and placenta the same rule applies to a lone
+    mask, which is supporting data and not a scan.
     """
+    if organ != "brain":
+        from .io import classify_organ_file
+
+        key = {"kidney": "rbf_map", "placenta": "perfusion_map"}[organ]
+        if inputs.get(key) is not None:
+            return True
+        # header-only survey: load_organ_folder does not build the map without
+        # arrays, so fall back to the same filename vocabulary it would apply
+        return any(classify_organ_file(f["name"])[0] in ("perfusion", "asl")
+                   for f in inputs.get("files") or [])
     # cbf_path as well as cbf: with load_arrays=False the loader records where
     # the map is without reading it, and `subject_dirs` relies on exactly that to
     # survey a cohort from headers alone. Checking only `cbf` reported an empty
@@ -266,13 +278,13 @@ def _has_raw(inputs: dict) -> bool:
                for f in inputs.get("files") or [])
 
 
-def subject_dirs(folder: str) -> list[str]:
+def subject_dirs(folder: str, organ: str = "brain") -> list[str]:
     """Names of the immediate subdirectories that hold a gradeable scan.
 
     Reads NIfTI headers only, never the voxels, so the upload console can ask
     "is this one subject or a cohort?" without paying to load every array twice.
     """
-    from .io import load_folder
+    from .io import load_folder, load_organ_folder
 
     if not os.path.isdir(folder):
         return []
@@ -282,7 +294,9 @@ def subject_dirs(folder: str) -> list[str]:
         if not os.path.isdir(d):
             continue
         try:
-            if _is_subject(load_folder(d, load_arrays=False)):
+            got = (load_folder(d, load_arrays=False) if organ == "brain"
+                   else load_organ_folder(d, organ, load_arrays=False))
+            if _is_subject(got, organ):
                 out.append(name)
         except Exception:
             # one unreadable folder must not hide the rest of the cohort
@@ -336,11 +350,12 @@ def grade_folder(folder: str, cfg: QCConfig | None = None,
         sub_dir = os.path.join(folder, name)
         if not os.path.isdir(sub_dir):
             continue
-        inputs = subject_inputs(sub_dir)
+        inputs = subject_inputs(sub_dir, organ)
         if inputs is None:
             continue
+        map_key = {"brain": "cbf", "kidney": "rbf_map", "placenta": "perfusion_map"}[organ]
         use = checks if checks is not None else checks_for(
-            inputs.get("cbf") is not None, _has_raw(inputs), organ)
+            inputs.get(map_key) is not None, _has_raw(inputs), organ)
         subjects.append(Subject(sid=name, report=run_qc(inputs, cfg=cfg, checks=use),
                                 inputs=inputs, cfg=cfg))
     return subjects

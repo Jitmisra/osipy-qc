@@ -473,16 +473,81 @@ def test_the_dropped_cbf_map_is_the_one_reported_on(clean_case):
     assert qei["metric"].get("qei") is not None
 
 
-def test_the_drop_zone_says_what_it_actually_takes():
-    """It accepts a folder of pipeline output - CBF map, tissue maps and all -
-    and a folder of those is graded as a cohort. For a while it called itself
-    "Raw acquisition" and listed only the Stream A checks; a reader following
-    the labels would have filled four boxes by hand to get what one folder pick
-    already does, and would never have discovered cohort mode at all."""
+def test_cohort_mode_is_visible_without_reading_anything():
+    """The complaint that prompted the redesign was "where is batch mode?".
+
+    It had been the third sentence of a caption inside one drop zone, after two
+    other bold headings. Three things now carry it instead, none of which require
+    reading prose: a labelled mode button under the H1, a caption that the button
+    rewrites, and a banner the page raises by itself when the files picked span
+    two or more subject folders.
+    """
     page = web._upload_page()
-    assert "a subject folder, or a whole cohort" in page
-    assert "A folder works too" in page
-    assert "every box above can stay empty" in page
-    assert "A folder of subject folders is graded" in page
+    assert 'data-mode="cohort"' in page, "no cohort affordance on the page"
+    assert "Cohort of subjects" in page, "the mode button is not labelled"
+    assert "subjectCount" in page and "cohortnote" in page, (
+        "nothing detects a cohort from what the user picked")
+    assert "Grade ' + n + ' subjects" in page, "the submit button does not name the count"
     assert f"up to {web.MAX_COHORT_SUBJECTS} subjects" in page
     assert "{max_cohort}" not in page, "template placeholder left unrendered"
+
+
+def test_the_drop_zone_caption_is_one_sentence_not_three_headings():
+    """Copy was appended over time until the caption rendered as three stacked
+    bold headings with orphaned fragments after them - one starting with a comma
+    (", subfolders included:"), one with an em dash ("- you get the ledger")."""
+    page = web._upload_page()
+    # the caption block only: from the zone's <div class="txt"> to its buttons
+    caption = page.split('class="drop dropall"')[1].split('class="txt"')[1] \
+                  .split('class="dropbtns"')[0]
+    assert caption.count("<b ") + caption.count("<b>") == 1, (
+        f"more than one bold heading in the drop-zone caption: {caption!r}")
+    for fragment in ("A folder works too", "every box above can stay empty",
+                     "A folder of subject folders is graded"):
+        assert fragment not in page, f"orphaned fragment still present: {fragment!r}"
+
+
+def _arrival_words(page: str) -> list[str]:
+    """The text a reader actually MEETS: brain selected, disclosures closed, the
+    other organs' blocks hidden.
+
+    Counting every word in the document is the wrong measure and flattered the
+    old page as much as the new one - two thirds of it has always lived inside
+    collapsed <details> and hidden organ sections that nobody sees on arrival.
+    The complaint was about the wall of text on the screen, so that is what this
+    counts.
+    """
+    import re
+    b = re.sub(r"<script.*?</script>", " ", page, flags=re.S)
+    b = re.sub(r"<style.*?</style>", " ", b, flags=re.S)
+    b = re.sub(r"<details[^>]*>(.*?)</details>",
+               lambda m: " ".join(re.findall(r"<summary[^>]*>(.*?)</summary>",
+                                             m.group(1), flags=re.S)),
+               b, flags=re.S)
+    b = re.sub(r'<div class="organ-only" data-organ="(?:kidney|placenta)".*?</div>\s*</div>',
+               " ", b, flags=re.S)
+    t = re.sub(r"<[^>]+>", " ", b)
+    t = re.sub(r"&[a-z]+;", " ", t)
+    return [w for w in t.split() if any(c.isalpha() for c in w)]
+
+
+def test_the_page_lost_real_weight():
+    """The complaint was "so much text". Guard the reduction, not a word list.
+
+    Measured 366 words on arrival before the redesign, 176 after. The bound is
+    set with headroom so ordinary copy edits do not trip it, and tight enough
+    that restoring either deleted block would.
+    """
+    n = len(_arrival_words(web._upload_page()))
+    assert n < 230, (
+        f"the console is back up to {n} words on arrival (366 before the "
+        "redesign, 176 after - the point of it was to cut that)")
+
+
+def test_the_duplicated_minimum_inputs_block_is_gone():
+    """The lede and the orange note said the same thing one after the other:
+    109 words between them to state that either input alone is enough."""
+    page = web._upload_page()
+    assert "Minimum inputs" not in page
+    assert "Whatever you give, the report states how many checks" not in page
+    assert "one is enough" in page, "the fact itself must survive the cut"

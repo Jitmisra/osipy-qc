@@ -279,3 +279,187 @@ def test_too_many_subjects_is_refused_with_a_reason(monkeypatch):
     monkeypatch.setattr(web, "MAX_COHORT_SUBJECTS", 2)
     with pytest.raises(ValueError, match="limit is 2"):
         _grade(_cohort_body(3))
+
+
+# --------------------------------------------------------------------------- #
+# the client-side half
+# --------------------------------------------------------------------------- #
+# The page detects a cohort in the browser, before anything is uploaded, so it
+# can say "3 subjects found" and flip the mode for you. That logic is JavaScript
+# and the rest of this suite cannot see it, so these run it under node - skipped
+# where node is absent rather than left as an untested claim.
+
+def _node() -> str | None:
+    import shutil
+    return shutil.which("node")
+
+
+def _page_js() -> str:
+    import re
+    return "\n".join(re.findall(r"<script[^>]*>(.*?)</script>",
+                                web._upload_page(), flags=re.S))
+
+
+def _extract_counter() -> str:
+    """`subjectCount` plus what it needs: the shipped rule table and roleKey.
+
+    It deliberately reuses the page's own filename vocabulary rather than
+    carrying a second copy, so the pieces cannot be tested apart.
+    """
+    import re
+    js = _page_js()
+    out = []
+    for pat in (r"var ROLES = \[.*?\];", r"var LABELS = \{.*?\};",
+                r"function roleKey\(n\)\{.*?\n  \}",
+                r"function subjectCount\(files\)\{.*?\n  \}"):
+        m = re.search(pat, js, flags=re.S)
+        assert m, f"the page no longer contains {pat}"
+        out.append(m.group(0))
+    return "\n".join(out)
+
+
+@pytest.mark.skipif(not _node(), reason="node not available")
+def test_the_generated_javascript_parses():
+    """The page is built by string interpolation, so a stray brace ships a page
+    whose script silently does nothing - no mode buttons, no detection, no
+    upload progress - and every server-side test still passes."""
+    import re
+    import subprocess
+    import tempfile
+    js = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", web._upload_page(), flags=re.S))
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(js)
+        path = fh.name
+    out = subprocess.run([_node(), "--check", path], capture_output=True, text=True)
+    assert out.returncode == 0, f"generated JS does not parse:\n{out.stderr}"
+
+
+@pytest.mark.skipif(not _node(), reason="node not available")
+@pytest.mark.parametrize("label,paths,expected", [
+    ("a real cohort", ["c/sub-01/sub-01_cbf.nii.gz", "c/sub-02/sub-02_cbf.nii.gz",
+                       "c/sub-03/sub-03_cbf.nii.gz"], 3),
+    # THE bug this rule exists for. A BIDS subject is `sub-01/anat` + `sub-01/perf`:
+    # two folders, one person. Counting folders read it as a 2-subject cohort,
+    # auto-flipped the mode, disabled the CBF box, and dropped the map the user had
+    # already chosen from the upload without a word.
+    ("one BIDS subject", ["sub-01/anat/sub-01_T1w.nii.gz",
+                          "sub-01/perf/sub-01_asl.nii.gz"], 1),
+    ("one subject with raw/", ["Agnik_Data/x_meancbf.nii",
+                               "Agnik_Data/raw/ASL.nii.gz"], 1),
+    # a folder is only a subject once it holds something gradeable
+    ("folders of masks only", ["c/a/mask.nii.gz", "c/b/mask.nii.gz"], 0),
+    ("loose files, no folder", ["a.nii.gz", "b.nii.gz"], 0),
+    ("subjects with subfolders", ["c/s1/perf/s1_cbf.nii.gz",
+                                  "c/s2/perf/s2_cbf.nii.gz"], 2),
+])
+def test_the_browser_counts_subjects_the_way_the_server_does(label, paths, expected):
+    import json
+    import subprocess
+    script = _extract_counter() + f"""
+const paths = {json.dumps(paths)};
+const files = paths.map(p => ({{webkitRelativePath: p, name: p.split('/').pop()}}));
+console.log(subjectCount(files));
+"""
+    out = subprocess.run([_node(), "-e", script], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert int(out.stdout.strip()) == expected, f"{label}: got {out.stdout.strip()}"
+
+
+def test_a_cbf_map_cannot_silently_cancel_cohort_grading():
+    """The server decided cohort-vs-single on `not paths["cbf"]`.
+
+    So one stale CBF part - which the page could produce by re-enabling a hidden
+    input that still held a file - routed a whole cohort into the single-scan
+    branch. The cohort's files were still uploaded and still graded, folded into
+    one report named after the single map: eleven checks became twenty, with
+    WARNs computed from three different people's raw data, and no error. The
+    12-subject cap was never consulted either, because it lives on the branch
+    that was skipped.
+    """
+    body = _cohort_body(3).rsplit(b"--" + BOUNDARY.encode() + b"--\r\n", 1)[0]
+    c = synthetic_case(quality="clean", seed=9)
+    body += _part("cbf", "cbf.nii.gz", _nifti_bytes(c.cbf))
+    body += b"--" + BOUNDARY.encode() + b"--\r\n"
+    with pytest.raises(ValueError, match="two different reports"):
+        _grade(body)
+
+
+def test_the_subject_cap_cannot_be_bypassed_the_same_way(monkeypatch):
+    """The cap is a memory ceiling, so slipping past it is not a cosmetic bug."""
+    monkeypatch.setattr(web, "MAX_COHORT_SUBJECTS", 2)
+    body = _cohort_body(3).rsplit(b"--" + BOUNDARY.encode() + b"--\r\n", 1)[0]
+    c = synthetic_case(quality="clean", seed=9)
+    body += _part("cbf", "cbf.nii.gz", _nifti_bytes(c.cbf))
+    body += b"--" + BOUNDARY.encode() + b"--\r\n"
+    # refused for being contradictory, never silently graded as one scan
+    with pytest.raises(ValueError):
+        _grade(body)
+
+
+# --------------------------------------------------------------------------- #
+# defects the adversarial review confirmed after the redesign
+# --------------------------------------------------------------------------- #
+def test_hidden_actually_hides():
+    """`.dbtn{display:inline-flex}` is an author rule and the UA's
+    `[hidden]{display:none}` is the weakest rule there is, so it lost.
+
+    `pickfiles.hidden = true` in cohort mode therefore changed nothing on
+    screen, leaving a "Choose files..." button that opens the single-file picker
+    in the one mode where only a folder makes sense.
+    """
+    assert "[hidden]{display:none!important}" in web._upload_page()
+
+
+def test_every_upload_box_has_its_own_accessible_name():
+    """Without one they all report the UA fallback "Choose file", so a screen
+    reader meets four identical buttons and cannot tell CBF from CSF."""
+    page = web._upload_page()
+    for title in ("Grey matter", "White matter", "CSF"):
+        assert f'aria-label="{title}"' in page, title
+
+
+def test_the_cohort_banner_is_announced():
+    """The banner appears, the mode flips and the submit button renames itself.
+    Silently, to anyone not watching the screen."""
+    page = web._upload_page()
+    assert "'role', 'status'" in page and "'aria-live', 'polite'" in page
+
+
+def test_a_filename_cannot_inject_markup():
+    """show() rendered each picked filename with innerHTML. A file called
+    `<img src=x onerror=...>.nii.gz` is legal on every platform this runs on."""
+    page = web._upload_page()
+    assert "nm.textContent = f.name" in page
+    assert "'<span>'+f.name+'</span>'" not in page
+
+
+def test_the_organ_chip_and_its_tooltip_agree():
+    """It rendered "brain (21)" with the title "20 checks." - the count came
+    from the registry, the tooltip from a hand-typed string that had gone stale."""
+    from osipy_qc.core.registry import all_checks
+    page = web._upload_page()
+    n = len(all_checks("brain"))
+    assert f"{n} checks." in page and f"brain ({n})" in page
+
+
+def test_the_placenta_vsasl_fields_exist_on_the_page():
+    """_organ_inputs reads these two whenever the scheme is VSASL. The page
+    rendered neither, so p4.1 always WARNed that they were missing and no user
+    action could clear it - and VSASL is the first option in the select."""
+    page = web._upload_page()
+    for f in ("cutoff_velocity_cm_s", "post_labeling_delay_s"):
+        assert f"placenta__{f}" in page, f
+
+
+def test_the_per_role_boxes_work_for_kidney_too(tmp_path):
+    """They are the escape hatch for a scanner that exports anon_0042.nii.gz.
+    `load_organ_folder` took no role_overrides, so for kidney and placenta the
+    box did nothing and the file was re-classified from its unreadable name."""
+    from osipy_qc.io import load_organ_folder
+    c = synthetic_case(quality="clean", seed=0)
+    _write(tmp_path / "anon_0042.nii.gz", c.cbf)
+    plain = load_organ_folder(str(tmp_path), "kidney")
+    assert plain.get("rbf_map") is None, "fixture name should be unrecognisable"
+    named = load_organ_folder(str(tmp_path), "kidney",
+                              role_overrides={"anon_0042.nii.gz": "asl"})
+    assert [f["name"] for f in named["files"]] == ["anon_0042.nii.gz"]

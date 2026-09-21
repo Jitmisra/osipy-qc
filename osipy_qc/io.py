@@ -581,8 +581,18 @@ def organ_mask_vocabulary() -> dict:
             "sides": {k: list(v) for k, v in _SIDE_TOKENS.items()}}
 
 
-def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict:
+def load_organ_folder(folder: str, organ: str, load_arrays: bool = True,
+                      role_overrides: dict[str, str] | None = None) -> dict:
     """Build an `inputs` dict for a kidney or placenta folder.
+
+    `role_overrides` maps a basename to a role, and BEATS the filename
+    vocabulary for that file - the same contract `load_folder` has. It was
+    missing here, so the upload console's per-role boxes did nothing for kidney
+    and placenta: a scanner exporting `anon_0042.nii.gz` could be labelled "ASL
+    series" by hand, and the file was still re-classified from its unreadable
+    name. Five checks came back UNKNOWN and the report said there was no M0 for
+    a scan whose M0 was in the upload directory. Those boxes exist for exactly
+    that case.
 
     Masks are REQUIRED for most checks and are never invented here: there is no
     renal or placental equivalent of "just run BET on it", and a mask this
@@ -590,7 +600,15 @@ def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict
     loads fine and simply produces UNKNOWNs, which is the honest outcome.
     """
     if organ not in ("kidney", "placenta"):
-        return load_folder(folder, load_arrays=load_arrays)
+        return load_folder(folder, load_arrays=load_arrays,
+                           role_overrides=role_overrides)
+
+    # The console's boxes speak the BRAIN vocabulary (asl / m0 / t1); the organ
+    # vocabulary names the same things differently. Translate, so a file the user
+    # put in the "M0" box is the organ loader's m0 too.
+    _FROM_BOX = {"asl": "asl", "m0": "m0", "t1": "structural"}
+    overrides = {k: _FROM_BOX[v] for k, v in (role_overrides or {}).items()
+                 if v in _FROM_BOX}
 
     paths = _find_niftis(folder)
     files, by_role = [], {}
@@ -600,7 +618,10 @@ def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict
         files.append({"name": name, "shape": tuple(int(s) for s in img.shape),
                       "voxel_mm": tuple(round(float(z), 3) for z in img.header.get_zooms()[:3]),
                       "path": p})
-        role, side = classify_organ_file(name)
+        if name in overrides:
+            role, side = overrides[name], None
+        else:
+            role, side = classify_organ_file(name)
         by_role.setdefault((role, side), []).append(p)
 
     asl_json, m0_json, _rows = _find_sidecars(folder)
@@ -644,6 +665,16 @@ def load_organ_folder(folder: str, organ: str, load_arrays: bool = True) -> dict
                 arr = _load_first(kind, side)
                 if arr is not None:
                     masks[side] = arr > 0.5
+            if not masks:
+                # An UNSIDED mask - `cortex_mask.nii.gz`, with no "left"/"right"
+                # token - classifies with side None and matched neither branch
+                # above, so it was dropped without a word and the checks reported
+                # "no masks supplied" about a mask sitting in the folder. A single
+                # ROI is filed under "single", the key the combined-label-map
+                # branch above already establishes for exactly this case.
+                arr = _load_first(kind)
+                if arr is not None:
+                    masks["single"] = arr > 0.5
             if masks:
                 inputs[key] = masks
         # `a or b` on ndarrays raises: numpy refuses to reduce an array to a

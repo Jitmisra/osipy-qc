@@ -121,11 +121,35 @@ _CONSOLE_CSS = """
 .lede{text-align:center;margin:1.5rem 0 2rem}
 .lede h1{font-size:clamp(1.9rem,5vw,2.7rem);font-weight:730;margin:.6rem 0 .4rem}
 .lede p{color:var(--muted);font-size:1.05rem;max-width:48ch;margin:0 auto}
+/* The UA sheet's [hidden]{display:none} is the WEAKEST rule there is, so any
+   author display declaration silently beats it. `.dbtn{display:inline-flex}`
+   did exactly that: `pickfiles.hidden = true` in cohort mode set the attribute
+   and changed nothing on screen, leaving a "Choose files..." button that opens
+   the single-file picker in the mode where only a folder is wanted. One rule,
+   and every `hidden` on the page starts meaning what it says. */
+[hidden]{display:none!important}
+/* The file input covers its card at opacity:0, so its own focus ring is
+   invisible: four consecutive tab stops with no indication of where you are.
+   Ring the CARD when the input inside it has keyboard focus. */
+.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.cohortnote{margin:.7rem 0 0;padding:.5rem .8rem;border-radius:8px;font-size:.85rem;
+  background:var(--accent-050);color:var(--accent-600);border:1px solid var(--accent-050);
+  font-weight:600}
+.cohortnote.over{background:#FBE4E0;border-color:#F1C7C0;color:#7a2a20}
+.modes{display:inline-flex;gap:.25rem;margin:1.1rem auto 0;padding:.25rem;
+  background:var(--well);border:1px solid var(--line);border-radius:100px}
+.mode{appearance:none;border:0;background:none;font:inherit;font-size:.86rem;
+  font-weight:600;color:var(--muted);padding:.42rem 1rem;border-radius:100px;cursor:pointer}
+.mode[aria-pressed=true]{background:var(--surface);color:var(--accent-600);
+  box-shadow:0 1px 2px rgba(16,24,40,.12)}
+.mode:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .err{max-width:640px;margin:0 auto 1.4rem;background:#FBE4E0;border:1px solid #F1C7C0;
   border-left:3px solid var(--fail);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
   padding:.8rem 1rem;font-size:.9rem;color:#7a2a20}
 form{margin-top:.5rem}
-.field-label{display:flex;align-items:baseline;gap:.5rem;margin:1.4rem 0 .5rem;font-weight:600}
+.field-label{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .5rem;
+  margin:1.4rem 0 .5rem;font-weight:600;line-height:1.3}
+.field-label .req,.field-label .opt{white-space:nowrap}
 .field-label .req{font-family:var(--mono);font-size:.66rem;color:var(--accent-600);
   background:var(--accent-050);padding:.1rem .4rem;border-radius:5px;letter-spacing:.03em}
 .field-label .opt{font-family:var(--mono);font-size:.66rem;color:var(--faint)}
@@ -149,10 +173,10 @@ form{margin-top:.5rem}
 .drop .clear{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:0;background:none;
   cursor:pointer;padding:.2rem .4rem;display:none;z-index:2}
 .drop.filled .clear{display:inline}
-.tissue-grid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
-@media (max-width:560px){.tissue-grid{grid-template-columns:1fr}}
-.tissue-grid .drop{padding:.85rem 1rem}
-.tissue-grid .ic{width:30px;height:30px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+@media (max-width:560px){.grid2{grid-template-columns:1fr}}
+.grid2 .drop{padding:.85rem 1rem}
+.grid2 .ic{width:30px;height:30px}
 .seg{display:flex;flex-wrap:wrap;gap:.4rem}
 .seg label{flex:1;min-width:86px;position:relative}
 .seg input{position:absolute;opacity:0;width:0;height:0}
@@ -297,17 +321,25 @@ def _dropzone(field: str, title: str, hint: str, required: bool = False) -> str:
         f'<div class="drop" data-field="{field}">'
         f'<div class="ic">{_FILE_IC}</div>'
         f'<div class="txt"><b>{esc(title)}</b><small data-hint>{esc(hint)}</small></div>'
-        f'<button type="button" class="clear" aria-label="remove">clear</button>'
-        f'<input type="file" name="{field}" accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"{req}></div>'
+        f'<button type="button" class="clear" aria-label="remove {esc(title)}">clear</button>'
+        # Without an aria-label every one of these reports the UA fallback name
+        # "Choose file", so a screen-reader user meets four identical buttons and
+        # cannot tell the CBF map from the CSF map.
+        f'<input type="file" name="{field}" aria-label="{esc(title)}" '
+        f'accept=".nii,.gz,application/gzip,application/x-gzip,application/octet-stream"{req}></div>'
     )
 
 
 _ORGAN_ORDER = ["brain", "kidney", "placenta"]
+# Counts are NOT written out here: the chip renders the real registry count next
+# to a tooltip that used to carry a stale hand-typed one, so the page said
+# "brain (21)" and "20 checks." in the same breath. The number now comes from the
+# registry in both places; only the prose lives here.
 _ORGAN_NOTE = {
-    "brain": "20 checks. QEI, tissue-based CBF bands, motion.",
-    "kidney": "19 checks. Needs per-kidney masks (left and right separately); the renal "
+    "brain": "QEI, tissue-based CBF bands, motion.",
+    "kidney": "Needs per-kidney masks (left and right separately); the renal "
               "consensus reports CORTICAL perfusion per kidney.",
-    "placenta": "15 checks. Needs a placenta mask, declared units and gestational age.",
+    "placenta": "Needs a placenta mask, declared units and gestational age.",
 }
 
 
@@ -376,6 +408,16 @@ _ORGAN_FACTS: dict[str, list[tuple]] = {
         ("lambda", "&lambda; (mL/g)", "number", None, "published placental range 0.9&ndash;1.0"),
         ("alpha", "&alpha; (labelling eff.)", "number", None, "published range 0.6&ndash;0.767"),
         ("t1_blood_ms", "T1 blood (ms)", "number", None, "~1650 at 3 T, ~1350 at 1.5 T"),
+        # _organ_inputs reads these two whenever the scheme is VSASL, and the
+        # page rendered neither - so both resolved to None, scheme_params came
+        # back empty, and p4.1 reported the parameters "missing" with no field
+        # anywhere that could supply them. VSASL is the FIRST option in the
+        # labelling-scheme select, so this was reachable on the first choice a
+        # placenta user makes, and there was no way to clear the WARN.
+        ("cutoff_velocity_cm_s", "VSASL cut-off velocity (cm/s)", "number", None,
+         "VSASL only &mdash; which vessels were saturated"),
+        ("post_labeling_delay_s", "Post-labeling delay (s)", "number", None,
+         "VSASL only &mdash; needed for a reproducible measurement"),
     ],
 }
 
@@ -466,7 +508,8 @@ def _upload_page(error: str = "") -> str:
     organ_seg = "".join(
         f'<label><input type="radio" name="organ" value="{o}"'
         f'{" checked" if o == "brain" else ""}>'
-        f'<span title="{esc(_ORGAN_NOTE[o])}">{o} ({counts.get(o, 0)})</span></label>'
+        f'<span title="{counts.get(o, 0)} checks. {esc(_ORGAN_NOTE[o])}">'
+        f'{o} ({counts.get(o, 0)})</span></label>'
         for o in _ORGAN_ORDER
     )
     seg = "".join(
@@ -490,23 +533,19 @@ def _upload_page(error: str = "") -> str:
   <div class="lede">
     <div class="eyebrow">CBF map or raw ASL &rarr; PASS / WARN / FAIL</div>
     <h1>Grade an ASL scan</h1>
-    <p>Drop in a CBF map, the raw acquisition, or both, and get an interpretable quality
-       report &mdash; a verdict per check, with the reason and the reference behind every
-       number. Drop a folder of subject folders and the whole cohort is graded at once.</p>
+    <p>Drop a CBF map, the raw acquisition, or both &mdash; one is enough.</p>
+    <div class="modes" role="group" aria-label="What are you grading">
+      <button type="button" class="mode" data-mode="one" aria-pressed="true">One scan</button>
+      <button type="button" class="mode" data-mode="cohort" aria-pressed="false">Cohort of subjects</button>
+    </div>
   </div>
   {err}
-  <div class="note">
-    <b>Minimum inputs &mdash; either one is enough.</b> A <b>CBF map</b> grades the map
-    itself; the <b>raw acquisition files</b> grade the acquisition, with no CBF map
-    needed. Supply both and every check runs. Whatever you give, the report states how
-    many checks it could reach and which it could not.
-  </div>
   <form id="qc" method="post" action="/run" enctype="multipart/form-data">
-    <div class="field-label">Organ <span class="req">choose first</span>
-      <span class="opt">it decides which files and which thresholds apply</span></div>
+    <div class="field-label">Organ <span class="req">choose first</span></div>
     <div class="seg">{organ_seg}</div>
 
-    <div class="field-label"><span data-map-label>CBF map</span> <span class="req">one of the two</span>
+    <div id="single-only">
+    <div class="field-label"><span data-map-label>CBF map</span> <span class="req">either one</span>
       <span class="opt">QEI, noise, CBF level, coverage</span></div>
     {_dropzone("cbf", "Choose or drop the perfusion map", "NIfTI, on one grid with its masks")}
 
@@ -517,29 +556,23 @@ def _upload_page(error: str = "") -> str:
         {_dropzone("gm", "Grey matter", "GM probability map")}
         {_dropzone("wm", "White matter", "WM probability map")}
         {_dropzone("csf", "CSF", "derived if omitted")}
-        <div class="drop" style="border:none;background:transparent;box-shadow:none;cursor:default">
-          <div class="txt"><small>Must share the <b>same voxel grid</b> as the CBF map.</small></div></div>
       </div>
     </div>
     {_organ_mask_boxes()}
     {_organ_fact_fields()}
 
-    <div class="field-label">Raw acquisition, a subject folder, or a whole cohort
-      <span class="req">one of the two</span>
-      <span class="opt">schema, control/label, M0, motion, data type</span></div>
+    </div>
+    <div class="field-label"><span data-raw-label>Raw acquisition</span>
+      <span class="req">either one</span>
+      <span class="opt">schema, control/label, M0, motion</span></div>
     <div class="drop dropall" id="zone">
       <input id="files" name="files" type="file" accept=".nii,.gz,.json,.tsv,application/gzip,application/x-gzip,application/octet-stream,application/json" multiple hidden>
       <input id="folder" name="files" type="file" webkitdirectory directory multiple hidden>
       <div class="ico">&#8615;</div>
       <div class="txt">
-        <b>Drop the raw files here &mdash; or a whole folder</b>
-        <small>The ASL series, M0 and structural, each recognised by its filename;
-        if a name is unusual, use the boxes underneath instead &mdash; they ignore the
-        name completely. <b>A folder works too</b>, subfolders included: if it also
-        holds a pipeline&rsquo;s CBF map and GM/WM/CSF maps, those are found as well
-        and every box above can stay empty. <b>A folder of subject folders is graded
-        as a cohort</b> &mdash; you get the ledger and every subject&rsquo;s report in
-        one page, up to {max_cohort} subjects.</small>
+        <b data-zone-title>Drop files or a folder here</b>
+        <small data-zone-hint>ASL series, M0 and structural, sorted by filename. A folder can
+        also carry the CBF and tissue maps, and subfolders are read too.</small>
         <div class="dropbtns">
           <button type="button" id="pickfiles" class="dbtn">Choose files&hellip;</button>
           <button type="button" id="pickdir" class="dbtn dbtn-alt">Choose a folder&hellip;</button>
@@ -548,12 +581,10 @@ def _upload_page(error: str = "") -> str:
       <div class="picked" id="picked"></div>
     </div>
 
-    <details class="manual strong" id="byrole">
-      <summary>Or say what each file is &mdash; use this if a name is not recognised</summary>
+    <details class="manual strong" id="byrole" data-single>
+      <summary>Name not recognised? Say what each file is</summary>
       <p class="thr-note whynow">Opened because a file above was not recognised from its
         name. Put it in the box that matches and the name stops mattering.</p>
-      <p class="thr-note">Nothing here depends on the filename. Whatever you put in a box is
-        treated as that kind of file.</p>
       <div class="grid2">
         {_dropzone("raw_asl", "ASL series", "4D control/label, pairs, or pre-subtracted dM")}
         {_dropzone("raw_m0", "M0", "the calibration scan")}
@@ -579,12 +610,10 @@ def _upload_page(error: str = "") -> str:
     <div class="organ-only" data-organ="brain">
       <div class="field-label">Population <span class="opt">newborn CBF is far lower than adult</span></div>
       <div class="seg">{seg}</div>
-      <p class="hint">A neonate's normal GM CBF (~16) would look abnormal against the adult
-         40&ndash;100 band, so pick <b>neonate</b> for newborn scans.</p>
     </div>
 
     <div class="submit-row">
-      <button type="submit" class="btn btn-primary">Grade scan &rarr;</button>
+      <button type="submit" class="btn btn-primary" id="go">Grade scan &rarr;</button>
     </div>
   </form>
 </div>
@@ -655,7 +684,9 @@ def _upload_page(error: str = "") -> str:
     // left over from a previous selection would otherwise be graded as part of
     // a placenta upload.
     document.querySelectorAll('.organ-only').forEach(function(node){{
-      var off = node.hidden;
+      // `single` is hidden in cohort mode; re-enabling its inputs here would post
+      // a stale single-scan file as part of a cohort.
+      var off = node.hidden || (single && single.hidden && single.contains(node));
       node.querySelectorAll('input, select').forEach(function(i){{ i.disabled = off; }});
     }});
   }}
@@ -663,6 +694,88 @@ def _upload_page(error: str = "") -> str:
     r.addEventListener('change', applyOrgan);
   }});
   applyOrgan();
+
+  // Cohort mode. The SERVER already decides cohort-vs-single by surveying the
+  // upload (batch.subject_dirs), so this posts no new field and changes no name -
+  // it only makes the capability visible and points the picker at the folder input.
+  var single = document.getElementById('single-only');
+  var zoneTitle = document.querySelector('[data-zone-title]');
+  var zoneHint  = document.querySelector('[data-zone-hint]');
+  var rawLabel  = document.querySelector('[data-raw-label]');
+  var go = document.getElementById('go');
+  var COPY = {{
+    one: {{title:'Drop files or a folder here',
+          hint:'ASL series, M0 and structural, sorted by filename. A folder can also carry '
+             + 'the CBF and tissue maps, and subfolders are read too.',
+          label:'Raw acquisition', go:'Grade scan \u2192'}},
+    cohort: {{title:'Drop the cohort folder here',
+          hint:'One folder per subject, up to {max_cohort} subjects. You get the ledger '
+             + 'plus every subject\u2019s report.',
+          label:'Cohort folder', go:'Grade cohort \u2192'}}
+  }};
+  var mode = 'one';
+  var autoFlipped = false;      // did the PAGE choose cohort, or did the user?
+  function applyMode(){{
+    var c = COPY[mode];
+    zoneTitle.textContent = c.title; zoneHint.textContent = c.hint;
+    rawLabel.textContent = c.label; go.textContent = c.go;
+    single.hidden = (mode === 'cohort');
+    // never post a stale single-scan file as part of a cohort
+    single.querySelectorAll('input, select').forEach(function(i){{
+      i.disabled = single.hidden; }});
+    // The per-role boxes sit OUTSIDE #single-only, and the cohort branch returns
+    // before role_overrides is ever read - so a file put in one of them was
+    // uploaded, ignored, and never mentioned. Hide and disable them with the
+    // rest rather than accept a file the run will discard.
+    document.querySelectorAll('[data-single]').forEach(function(node){{
+      node.hidden = single.hidden;
+      node.querySelectorAll('input, select').forEach(function(i){{
+        i.disabled = single.hidden; }});
+    }});
+    document.getElementById('pickfiles').hidden = (mode === 'cohort');
+    // organ gating runs after, and knows to leave a hidden single-only alone
+    applyOrgan();
+  }}
+  document.querySelectorAll('.mode').forEach(function(b){{
+    b.addEventListener('click', function(){{
+      var next = b.getAttribute('data-mode');
+      if(next === mode) return;
+      mode = next;
+      document.querySelectorAll('.mode').forEach(function(o){{
+        o.setAttribute('aria-pressed', String(o === b)); }});
+      // An explicit choice wins, and the form must match what the pill now says.
+      //
+      // Without this the page lied in the most expensive way it could. Disabling
+      // a file input does not clear its FileList, so switching back to One scan
+      // re-enabled a CBF box that still held a file AND left the cohort folder
+      // attached: the POST carried both, the server took the single-scan branch
+      // because a cbf part was present, and the user got one scan's report
+      // computed partly from three other people's raw files - no error, twenty
+      // checks instead of eleven, two WARNs that belonged to nobody. The stale
+      // "3 subjects found" banner sat above it the whole time.
+      resetSelection();
+      applyMode();
+      // Deliberately does NOT open the file dialog here. Firing a native picker
+      // off a toggle, before the user has read the caption that toggle just
+      // wrote, takes the page away from them mid-thought.
+    }});
+  }});
+
+  // Everything the user had chosen, dropped. Called on an explicit mode switch.
+  function resetSelection(){{
+    ['files', 'folder', 'cbf', 'gm', 'wm', 'csf',
+     'raw_asl', 'raw_m0', 'raw_t1'].forEach(function(name){{
+      var el = document.getElementById(name)
+            || document.querySelector('input[name="' + name + '"]');
+      if(el){{ el.value = ''; }}
+    }});
+    document.querySelectorAll('.drop.filled').forEach(function(d){{
+      d.classList.remove('filled'); }});
+    var pk = document.getElementById('picked');
+    if(pk) pk.innerHTML = '';
+    announce(0);
+  }}
+  applyMode();
 
   var multi = document.getElementById('files');
   var picked = document.getElementById('picked');
@@ -673,7 +786,7 @@ def _upload_page(error: str = "") -> str:
   // dropped the file without a word.
   var ROLES = {role_rules};
   var LABELS = {role_labels};
-  function role(n){{
+  function roleKey(n){{
     n = n.toLowerCase();
     for(var i=0;i<ROLES.length;i++){{
       var r = ROLES[i];
@@ -681,15 +794,18 @@ def _upload_page(error: str = "") -> str:
       // the patterns are written to be valid in both languages - so the page
       // cannot drift from the loader the way the hand-written copy did.
       if(r.how === 'matches'){{
-        if(new RegExp(r.pattern).test(n)) return LABELS[r.role];
+        if(new RegExp(r.pattern).test(n)) return r.role;
         continue;
       }}
       for(var j=0;j<r.tokens.length;j++){{
         var t = r.tokens[j];
-        if(r.how === 'starts' ? n.indexOf(t) === 0 : n.indexOf(t) >= 0) return LABELS[r.role];
+        if(r.how === 'starts' ? n.indexOf(t) === 0 : n.indexOf(t) >= 0) return r.role;
       }}
     }}
-    return LABELS.other;
+    return 'other';
+  }}
+  function role(n){{
+    return LABELS[roleKey(n)] || LABELS.other;
   }}
   var byrole = document.getElementById('byrole');
   function show(src){{
@@ -698,13 +814,98 @@ def _upload_page(error: str = "") -> str:
     for(var i=0;i<src.files.length;i++){{
       var f = src.files[i], s = document.createElement('span'), lab = role(f.name);
       if(lab === LABELS.other) unclear++;
-      s.innerHTML = '<span>'+f.name+'</span><b>'+lab+'</b>';
+      // textContent, not innerHTML: a filename is somebody else's text and this
+      // list renders it verbatim. `<img src=x onerror=...>.nii.gz` is a legal
+      // filename on every platform this runs on.
+      var nm = document.createElement('span'); nm.textContent = f.name;
+      var lb = document.createElement('b');    lb.textContent = lab;
+      s.appendChild(nm); s.appendChild(lb);
       picked.appendChild(s);
     }}
     // That label says "use the boxes below", and the boxes sit in a collapsed
     // <details> no code ever opened. Pointing a reader at something they cannot
     // see is not an instruction, so opening it is what makes the sentence true.
     if(unclear){{ byrole.open = true; byrole.classList.add('needed'); }}
+    announce(subjectCount(src.files));
+  }}
+
+  // How many subjects did they just pick? Counted from the SECOND path segment
+  // of a folder pick - cohort/sub-01/cbf.nii.gz - but a segment only counts once
+  // it holds something gradeable.
+  //
+  // Counting folders alone was wrong, and wrong in the direction that loses
+  // data. A BIDS subject is `sub-01/anat/` + `sub-01/perf/`: two folders, one
+  // person. That read as a 2-subject cohort, flipped the mode, disabled the CBF
+  // box, and the map the user had already chosen was dropped from the upload
+  // without a word. So the same question the server asks in batch._is_subject
+  // is asked here - is there a perfusion map or an ASL series in it - using the
+  // vocabulary the page already carries rather than a second copy of the rule.
+  function subjectCount(files){{
+    var gradeable = {{}}, seen = {{}}, n = 0;
+    for(var i=0;i<files.length;i++){{
+      var rel = files[i].webkitRelativePath || '';
+      var parts = rel.split('/');
+      if(parts.length < 3) continue;          // root/file = one subject, not a cohort
+      var k = roleKey(parts[parts.length - 1]);
+      if(k === 'cbf' || k === 'asl') gradeable[parts[1]] = 1;
+      seen[parts[1]] = 1;
+    }}
+    for(var key in gradeable){{ if(gradeable.hasOwnProperty(key)) n++; }}
+    return n;
+  }}
+
+  // The answer to "where is batch mode?". A user who drops a cohort while still
+  // in One scan mode is told what was found, the mode flips itself, and the
+  // submit button names the number - so the capability is discovered by doing
+  // rather than by reading a caption nobody reads.
+  function announce(n){{
+    var old = document.getElementById('cohortnote');
+    if(old) old.remove();
+    if(n < 2){{
+      // Flip BACK too. Replacing a cohort with a smaller selection used to clear
+      // the banner and leave the page stuck in cohort mode, with the CBF box
+      // still hidden and disabled and no way to tell why it had vanished.
+      if(mode === 'cohort' && autoFlipped){{
+        autoFlipped = false;
+        var one = document.querySelector('.mode[data-mode="one"]');
+        if(one){{
+          mode = 'one';
+          document.querySelectorAll('.mode').forEach(function(o){{
+            o.setAttribute('aria-pressed', String(o === one)); }});
+          applyMode();
+        }}
+      }}
+      go.textContent = COPY[mode].go;
+      return;
+    }}
+    var over = n > {max_cohort};
+    var el = document.createElement('div');
+    el.id = 'cohortnote';
+    el.className = 'cohortnote' + (over ? ' over' : '');
+    // The banner appears, the mode flips and the submit button renames itself,
+    // all without a word to a screen reader. role=status announces the change
+    // politely; the text carries the over-limit warning too, so colour is not
+    // the only thing saying it.
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.textContent = over
+      ? n + ' subjects found, and the limit is {max_cohort}. Upload fewer, or split the cohort.'
+      : n + ' subjects found \u2014 graded as a cohort, with a ledger across them.';
+    picked.parentNode.insertBefore(el, picked);
+    // flip the pill for them rather than asking them to have known. Set
+    // `autoFlipped` first: the click handler resets the selection on an explicit
+    // switch, and this one is not explicit - it is the page reacting to what was
+    // already picked, so it must not throw that selection away.
+    if(mode !== 'cohort'){{
+      autoFlipped = true;
+      mode = 'cohort';
+      var btn = document.querySelector('.mode[data-mode="cohort"]');
+      document.querySelectorAll('.mode').forEach(function(o){{
+        o.setAttribute('aria-pressed', String(o === btn)); }});
+      applyMode();
+    }}
+    go.textContent = over ? COPY[mode].go
+                          : 'Grade ' + n + ' subjects \u2192';
   }}
   var folder = document.getElementById('folder');
   document.getElementById('pickfiles').addEventListener('click', function(ev){{
@@ -727,9 +928,16 @@ def _upload_page(error: str = "") -> str:
     var dt = new DataTransfer();
     keep.forEach(function(f){{ dt.items.add(f); }});
     folder.files = dt.files;
+    if(folder.files.length) multi.value = '';
     show(folder);
   }});
-  multi.addEventListener('change', function(){{ show(multi); }});
+  // Both inputs are name="files", so whatever sits in the OTHER one is posted
+  // too - invisibly, because show() only ever renders the one just used. Picking
+  // three files after a cohort folder uploaded all of it and listed three names.
+  multi.addEventListener('change', function(){{
+    if(multi.files.length) folder.value = '';
+    show(multi);
+  }});
   ['dragenter','dragover'].forEach(function(e){{
     zone.addEventListener(e, function(ev){{ ev.preventDefault(); zone.classList.add('over'); }});
   }});
@@ -1114,11 +1322,25 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
         # cost a second full load of every array. A folder counts as a subject
         # when it holds a CBF map or an ASL series - see batch._is_subject, which
         # is what stops a BIDS `sub-01/{anat,perf}` reading as two people.
-        if saved_raw and not paths["cbf"]:
+        if saved_raw:
             from .batch import subject_dirs
 
-            sids = subject_dirs(raw_dir)
+            sids = subject_dirs(raw_dir, organ)
             if len(sids) >= 2:
+                if paths["cbf"]:
+                    # Contradictory upload: one named CBF map AND a folder of
+                    # subjects. This used to be decided silently by `not
+                    # paths["cbf"]`, which took the single-scan branch - so the
+                    # cohort's files were still graded, folded into one report
+                    # named after the single map, and MAX_COHORT_SUBJECTS was
+                    # never consulted. A 13-subject upload sailed through the
+                    # cap that way. There is no right answer to guess at here,
+                    # so it is refused and said out loud.
+                    raise ValueError(
+                        f"This upload has a CBF map in its own box AND {len(sids)} "
+                        "subject folders, and those ask for two different reports. "
+                        "Remove the CBF map to grade the cohort, or remove the "
+                        "folders to grade the one map.")
                 return _grade_cohort(raw_dir, sids, cfg, organ,
                                      client_dir or "uploaded cohort")
 
@@ -1130,7 +1352,8 @@ def _grade_upload(fields: dict[str, tuple[str, bytes]]) -> dict:
             from .io import load_folder, load_organ_folder
             # the CBF-derived inputs win where the two overlap; the raw folder
             # only adds what it alone can know
-            loaded = (load_organ_folder(raw_dir, organ) if organ != "brain"
+            loaded = (load_organ_folder(raw_dir, organ, role_overrides=role_overrides)
+                      if organ != "brain"
                       else load_folder(raw_dir, role_overrides=role_overrides))
             inputs = {**loaded, **inputs}
 
