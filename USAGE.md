@@ -365,6 +365,26 @@ about the scan in front of you.
 
 ### Setting it up
 
+### The short way
+
+Put the authors' `qei_inference_package.zip` in `qei_net_model/` and run:
+
+```bash
+python3 scripts/setup_qei_net.py     # Windows: python scripts\setup_qei_net.py
+python3 scripts/run_ui.py            # then this, and it says "QEI-Net: ON"
+```
+
+The first script unpacks the zip, builds the separate environment, and scores a
+test volume to prove the model runs before telling you it worked. The second
+starts the console with the two variables already set. Safe to re-run: it
+verifies the environment by importing from it rather than by looking for a
+folder, and rebuilds when that fails (`--rebuild` forces it).
+
+`qei_net_model/README.md` is the version written for someone who has not seen
+this repo before. The rest of this section is what those scripts do by hand.
+
+### The long way
+
 You need the inference package and its weights from the model's authors; they are
 not distributed here. Unpack it so `src/` and `weights/` sit side by side:
 

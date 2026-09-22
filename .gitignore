@@ -35,3 +35,8 @@ weights/
 *.pth
 *.pt
 *.ckpt
+
+# The QEI-Net drop folder: the folder and its README are tracked so the
+# instructions ship with the repo; anything a user drops INTO it is not.
+qei_net_model/*
+!qei_net_model/README.md

@@ -39,6 +39,14 @@ Sanity check:
 python -m pytest -q                  # -> 72 passed
 ```
 
+**Optional: QEI-Net.** One check, `1.1.qei_net`, scores the map with a
+deep-learning model that is not part of this package and whose weights are not
+ours to distribute. If you have the authors' `qei_inference_package.zip`, put it
+in [`qei_net_model/`](qei_net_model/) and run `python3 scripts/setup_qei_net.py`;
+then `python3 scripts/run_ui.py` starts the console with it wired in. Without it
+that one row reads N/A and nothing else changes — see
+[`qei_net_model/README.md`](qei_net_model/README.md).
+
 ---
 
 ## 2. Try it in 30 seconds (no data needed)

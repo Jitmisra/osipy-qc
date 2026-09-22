@@ -298,3 +298,112 @@ def test_a_saturated_map_is_still_reported_as_saturated_not_as_empty(monkeypatch
     cbf = _plausible_cbf(level=2700.0)
     r = qei_net_check(cbf=cbf, gm=np.ones(cbf.shape), affine=np.eye(4), cfg=CFG)
     assert "clip bound" in r.reason and "carries data" not in r.reason
+
+
+# --------------------------------------------------------------------------- #
+# the mentor-facing setup scripts
+# --------------------------------------------------------------------------- #
+# These exist so someone who is not a developer can enable QEI-Net with two
+# commands. An adversarial review of the first version confirmed twenty defects,
+# most of them in the same place: the scripts decided things by looking for a
+# FILE rather than by checking whether anything worked.
+
+SCRIPTS = ROOT / "scripts"
+
+
+def _script(name: str) -> str:
+    return (SCRIPTS / name).read_text()
+
+
+def test_the_setup_scripts_are_valid_python():
+    import py_compile
+    for name in ("setup_qei_net.py", "run_ui.py"):
+        py_compile.compile(str(SCRIPTS / name), doraise=True)
+
+
+def test_the_drop_folder_ships_with_instructions_but_no_model():
+    """The folder is tracked so the instructions travel with the repo; anything
+    put INTO it is not."""
+    drop = ROOT / "qei_net_model"
+    assert (drop / "README.md").is_file()
+    out = subprocess.run(["git", "check-ignore", "-q",
+                          "qei_net_model/qei_inference_package.zip"],
+                         cwd=ROOT, capture_output=True)
+    assert out.returncode == 0, "a zip dropped in the folder is NOT gitignored"
+    out = subprocess.run(["git", "check-ignore", "-q", "qei_net_model/README.md"],
+                         cwd=ROOT, capture_output=True)
+    assert out.returncode != 0, "the instructions must stay tracked"
+
+
+def test_a_half_built_environment_is_detected_rather_than_reused():
+    """The worst defect the review found, and the one a mentor would actually hit.
+
+    `python -m venv` succeeds in seconds and creates the interpreter; every pip
+    call after it can fail on its own. Gating reuse on "the interpreter exists"
+    meant one failed install poisoned the folder permanently - every later run
+    printed "reusing the environment", installed nothing, and died in a
+    traceback, with the cure (delete a folder by hand) documented nowhere.
+    """
+    src = _script("setup_qei_net.py")
+    assert "def env_is_usable" in src
+    assert "import " in src and "DEPS" in src
+    assert "if not rebuild and env_is_usable(py)" in src, (
+        "reuse is not gated on the environment actually working")
+    assert '"--rebuild"' in src
+
+
+def test_run_ui_does_not_claim_the_model_is_on_without_checking():
+    """It printed "QEI-Net: ON" from two filenames existing. A half-built
+    environment passed that, and then every scan returned UNKNOWN "No module
+    named 'torch'" - the console and the report saying opposite things."""
+    src = _script("run_ui.py")
+    assert "def _runnable" in src
+    assert "_runnable(py)" in src, "find_model returns without probing the env"
+    assert "environment is incomplete" in src, "no message for the half-built case"
+
+
+def test_the_new_package_is_validated_before_the_old_one_is_deleted():
+    """A truncated zip used to delete a working install first and then fail,
+    leaving no model at all and a BadZipFile traceback to explain it."""
+    src = _script("setup_qei_net.py")
+    stage_at = src.index("def stage_zip")
+    assert "testzip()" in src, "the archive is never checked for damage"
+    # check_layout runs against the staged copy, and only then is PKG replaced
+    assert src.index("check_layout(staged)") < src.index("shutil.rmtree(PKG")
+
+
+def test_failures_are_sentences_not_tracebacks():
+    """The audience is stated: researchers who will not debug a traceback."""
+    src = _script("setup_qei_net.py")
+    assert "except Exception as exc:" in src, "main() is not wrapped"
+    assert "except KeyboardInterrupt" in src
+    assert "STOPPED:" in src
+
+
+def test_the_instructions_use_the_interpreter_each_platform_actually_has():
+    """macOS ships no `python`, only `python3`; Windows is the other way round.
+    Printing one to both audiences sends half the readers to a shell error."""
+    for name in ("setup_qei_net.py", "run_ui.py"):
+        assert "def py_cmd" in _script(name), name
+    readme = (ROOT / "qei_net_model" / "README.md").read_text()
+    assert "python3 scripts/setup_qei_net.py" in readme
+    assert "Windows: python scripts" in readme
+
+
+def test_a_partial_weights_package_is_run_with_the_folds_it_has():
+    """The first version said a partial package "will still run". It does not:
+    run_qei.py defaults to folds 0-4 and exits when one is missing. It now
+    passes the folds actually present, and says the score is not comparable."""
+    src = _script("setup_qei_net.py")
+    assert "def fold_args" in src and '"--folds"' in src
+    assert "NOT the published one" in src
+
+
+def test_the_smoke_test_exercises_the_path_a_real_map_takes():
+    """An on-grid volume skips resampling and torchio entirely, so "it works"
+    would have been true only of the one case no real CBF map is in."""
+    src = _script("setup_qei_net.py")
+    assert "3.0, 3.0, 3.0" in src, "the test volume is not off-grid"
+    assert '"--mask", mask' in src, (
+        "an off-grid volume needs an explicit mask; --derive_mask_from_cbf "
+        "requires the model's own grid")
