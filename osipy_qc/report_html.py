@@ -680,26 +680,72 @@ def write_html(report, path: str, inputs: dict | None = None,
 COHORT_FIGURE_LIMIT = 8
 
 _COHORT_CSS = """
-.ledger{width:100%;border-collapse:collapse;margin:1.1rem 0 .4rem;font-size:.92rem}
-.ledger th{text-align:left;font-weight:600;font-size:.74rem;letter-spacing:.06em;
-  text-transform:uppercase;color:var(--muted);padding:.5rem .7rem;
-  border-bottom:1px solid var(--line)}
-.ledger td{padding:.55rem .7rem;border-bottom:1px solid var(--line);vertical-align:middle}
-.ledger tr:last-child td{border-bottom:none}
-.ledger .sid{font-family:ui-monospace,Menlo,monospace;font-weight:600}
-.ledger .num{font-variant-numeric:tabular-nums}
-.vpill{display:inline-block;padding:.12rem .5rem;border-radius:999px;
-  font-size:.74rem;font-weight:700;letter-spacing:.03em}
-.subj{margin:.6rem 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.subj>summary{cursor:pointer;padding:.7rem .9rem;font-weight:600;
-  font-family:ui-monospace,Menlo,monospace;list-style:none}
-.subj>summary::-webkit-details-marker{display:none}
-.subj>summary:hover{background:var(--card-hover,rgba(0,0,0,.02))}
-.subj[open]>summary{border-bottom:1px solid var(--line)}
-.subj .inner{padding:0 1rem 1rem}
-.cohort-stats{display:flex;flex-wrap:wrap;gap:.6rem;margin:.8rem 0}
-.cohort-stats .card{flex:1 1 8rem;min-width:8rem}
-@media (max-width:640px){.ledger .flagcol{display:none}}
+/* One hero figure for the whole view, per the dataviz rule: the story is a single
+   number, and three equal-weight stat cards saying "2  1  3" buried it. */
+.c-hero{margin:.4rem 0 .2rem}
+.c-hero .big{font-size:clamp(2.1rem,5.2vw,3rem);font-weight:730;line-height:1.05;
+  letter-spacing:-.02em}
+.c-hero .sub{color:var(--muted);font-size:.95rem;margin-top:.45rem}
+.c-counts{display:flex;flex-wrap:wrap;gap:.4rem;margin:.9rem 0 0}
+.c-count{display:inline-flex;align-items:baseline;gap:.4rem;padding:.25rem .65rem;
+  border-radius:100px;font-size:.78rem;font-weight:600}
+.c-count b{font-size:.95rem;font-variant-numeric:tabular-nums}
+
+/* "what flagged across the cohort". Check names are NOMINAL - no natural order -
+   so every bar is ONE hue. Darker-where-bigger would double-encode the length as
+   hue and burn the only free channel on information the bar already carries. */
+.c-flags{margin:1.6rem 0 0}
+.c-flags h2{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;margin:0 0 .6rem}
+.c-flag{display:grid;grid-template-columns:minmax(7rem,12rem) minmax(0,1fr) 2.2rem;
+  align-items:center;gap:.7rem;padding:.2rem 0;font-size:.85rem}
+/* the track stops short of the count, so the longest bar never crowds its own
+   number the way a 100%-width bar against an `auto` column did */
+.c-flags{max-width:44rem}
+.c-flag .nm{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-flag .tr{height:9px;background:var(--well);border-radius:100px;overflow:hidden}
+.c-flag .tr i{display:block;height:100%;background:var(--accent);border-radius:100px}
+.c-flag .n{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.8rem}
+
+/* The ledger IS the chart and the detail. It was a table, and then the same six
+   subjects again underneath as collapsed cards: two lists of one thing. */
+.ledger{margin:1.7rem 0 0;border-top:1px solid var(--line)}
+.lhead,.lrow>summary{display:grid;
+  grid-template-columns:minmax(6rem,1.1fr) 5.2rem minmax(8rem,1.4fr) minmax(6rem,1.6fr);
+  align-items:center;gap:.9rem;padding:.6rem .2rem}
+.lhead{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;border-bottom:1px solid var(--line)}
+.lrow{border-bottom:1px solid var(--line)}
+.lrow>summary{cursor:pointer;list-style:none}
+.lrow>summary::-webkit-details-marker{display:none}
+.lrow>summary:hover{background:var(--well)}
+.lrow[open]>summary{background:var(--well)}
+.lrow .vpill{font-size:.68rem;padding:.14rem .48rem}
+.lrow .sid{font-family:var(--mono);font-weight:600;font-size:.86rem;
+  overflow:hidden;text-overflow:ellipsis}
+.lrow .flag{color:var(--muted);font-size:.82rem;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+/* QEI as a bar against its cutoff, so the spread across the cohort is visible
+   without a second chart. The number stays beside it - the colour is a status
+   colour, and amber/green sit only 12 DeltaE apart even with full colour vision,
+   so nothing here is ever carried by hue alone. */
+.qcell{display:flex;align-items:center;gap:.55rem}
+.qtrack{position:relative;flex:1;height:9px;background:var(--well);border-radius:100px}
+.qtrack i{position:absolute;inset:0 auto 0 0;border-radius:100px}
+/* The cutoff marker paints OVER the fill, so it is readable both on an empty
+   track and inside a saturated bar. A light tick vanished against the green. */
+.qtrack em{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);
+  opacity:.55;box-shadow:0 0 0 1px var(--surface)}
+.qnum{font-variant-numeric:tabular-nums;font-size:.8rem;min-width:3.1rem;
+  text-align:right;color:var(--ink)}
+.linner{padding:.2rem 1rem 1.4rem;background:var(--well)}
+.c-legend{font-size:.74rem;color:var(--muted);margin:.5rem .2rem 0}
+@media (max-width:640px){
+  .lhead{display:none}
+  .lrow>summary{grid-template-columns:1fr auto;gap:.35rem .7rem}
+  .lrow .qcell{grid-column:1/-1}
+  .lrow .flag{grid-column:1/-1;white-space:normal}
+}
 """
 
 
@@ -710,7 +756,14 @@ def _vpill(verdict: str) -> str:
 
 def cohort_body(subjects, summary, cfg: QCConfig | None = None,
                 with_figures: bool | None = None) -> str:
-    """Ledger + per-subject reports, without the page chrome."""
+    """The cohort view: one hero, what flagged across it, then the ledger.
+
+    The ledger is the chart AND the detail. It used to be a table followed by the
+    same subjects again as collapsed cards - two lists of one thing, neither of
+    which said anything a per-subject report did not already say. A cohort view
+    earns its place only by answering what no single report can: how the group is
+    spread, and whether a finding is one bad scan or a systemic problem.
+    """
     from .api import ledger_row
 
     cfg = cfg or QCConfig()
@@ -721,57 +774,102 @@ def cohort_body(subjects, summary, cfg: QCConfig | None = None,
                   key=lambda r: (r["severity"],
                                  r["qei"] if r["qei"] is not None else 2.0))
     by_sid = {s.sid: s for s in subjects}
-
     counts = summary.counts
-    stats = "".join(
-        f'<div class="card kpi"><div class="label">{esc(v)}</div>'
-        f'<div class="value num" style="color:{VERDICT_COLOURS.get(v, ("#8A8079", ""))[0]}">'
-        f'{counts.get(v, 0)}</div>'
-        f'<div class="foot">of {summary.total}</div></div>'
-        for v in ("FAIL", "WARN", "PASS") if counts.get(v)
-    )
+    n = summary.total
+    bad = counts.get("FAIL", 0) + counts.get("WARN", 0)
 
-    body = [
-        f'<h1 style="margin:.2rem 0 .1rem">{summary.total} subjects graded</h1>',
-        f'<div class="cohort-stats">{stats}</div>',
-        '<table class="ledger"><thead><tr>'
-        '<th>Subject</th><th>Verdict</th><th>QEI</th>'
-        '<th class="flagcol">Leading finding</th></tr></thead><tbody>',
+    # ---- the one hero figure -------------------------------------------
+    if counts.get("FAIL"):
+        head = f"{counts['FAIL']} of {n} failed"
+    elif bad:
+        head = f"{bad} of {n} need a look"
+    else:
+        head = f"all {n} passed"
+    qeis = sorted(r["qei"] for r in rows if r["qei"] is not None)
+    sub = []
+    if qeis:
+        med = qeis[len(qeis) // 2] if len(qeis) % 2 else \
+            (qeis[len(qeis) // 2 - 1] + qeis[len(qeis) // 2]) / 2
+        below = sum(1 for q in qeis if q < cfg.qei_warn)
+        sub.append(f"median QEI {med:.3f}")
+        if below:
+            sub.append(f"{below} below the {cfg.qei_warn:g} cutoff")
+    chips = "".join(
+        f'<span class="c-count" style="color:{VERDICT_COLOURS[v][0]};'
+        f'background:{VERDICT_COLOURS[v][1]}"><b>{counts[v]}</b> {v}</span>'
+        for v in ("FAIL", "WARN", "PASS", "UNKNOWN") if counts.get(v))
+
+    out = [
+        '<div class="c-hero">',
+        f'<div class="big">{esc(head)}</div>',
+        (f'<div class="sub">{esc(" &middot; ".join(sub))}</div>'.replace(
+            "&amp;middot;", "&middot;") if sub else ""),
+        f'<div class="c-counts">{chips}</div>',
+        '</div>',
     ]
+
+    # ---- what flagged, across the cohort --------------------------------
+    # summarise() already counts each check that FAILed or WARNed, once per
+    # subject. Nothing rendered it, which left the cohort page unable to answer
+    # the one question it exists for.
+    breakdown = [(label, k) for label, k in summary.artifact_breakdown if k]
+    if breakdown:
+        top = breakdown[:6]
+        worst = max(k for _, k in top)
+        bars = "".join(
+            f'<div class="c-flag"><span class="nm" title="{esc(label)}">{esc(label)}</span>'
+            f'<span class="tr"><i style="width:{100 * k / worst:.0f}%"></i></span>'
+            f'<span class="n">{k}</span></div>'
+            for label, k in top)
+        more = (f'<div class="c-legend">and {len(breakdown) - len(top)} more</div>'
+                if len(breakdown) > len(top) else "")
+        out.append(
+            f'<div class="c-flags"><h2>What flagged, and in how many subjects</h2>'
+            f'{bars}{more}</div>')
+
+    # ---- the ledger ------------------------------------------------------
+    out.append('<div class="ledger">'
+               '<div class="lhead"><span>Subject</span><span>Verdict</span>'
+               f'<span>QEI &middot; cutoff {cfg.qei_warn:g}</span>'
+               '<span>Leading finding</span></div>')
     for r in rows:
-        qei = f'{r["qei"]:.3f}' if isinstance(r["qei"], (int, float)) else "&ndash;"
-        body.append(
-            f'<tr><td class="sid">{esc(r["sid"])}</td>'
-            f'<td>{_vpill(r["verdict"])}</td>'
-            f'<td class="num">{qei}</td>'
-            f'<td class="flagcol">{esc(r["flag"])}</td></tr>')
-    body.append('</tbody></table>')
+        s_obj = by_sid[r["sid"]]
+        q = r["qei"]
+        if isinstance(q, (int, float)):
+            fill = VERDICT_COLOURS.get(r["verdict"], ("#8A8079", ""))[0]
+            qcell = (
+                '<span class="qcell"><span class="qtrack">'
+                f'<i style="width:{max(0.0, min(1.0, q)) * 100:.1f}%;background:{fill}"></i>'
+                f'<em style="left:{cfg.qei_warn * 100:.0f}%"></em></span>'
+                f'<b class="qnum">{q:.3f}</b></span>')
+        else:
+            qcell = '<span class="qcell"><span class="qnum">&ndash;</span></span>'
+        inner = report_body(s_obj.report, s_obj.inputs if with_figures else {},
+                            s_obj.cfg, with_note=False)
+        out.append(
+            f'<details class="lrow"><summary>'
+            f'<span class="sid">{esc(r["sid"])}</span>'
+            f'<span>{_vpill(r["verdict"])}</span>'
+            f'{qcell}'
+            f'<span class="flag">{esc(r["flag"])}</span>'
+            f'</summary><div class="linner">{inner}</div></details>')
+    out.append('</div>')
 
     if not with_figures:
-        body.append(
-            f'<div class="note">Per-subject images are omitted above '
+        out.append(
+            f'<div class="c-legend">Per-subject images are omitted above '
             f'{COHORT_FIGURE_LIMIT} subjects, because four mosaics each would run this '
-            f'page into the tens of megabytes. Grade a subject on its own to see them.'
+            'page into the tens of megabytes. Grade a subject on its own to see them.'
             '</div>')
 
-    # Worst first, so the reason for the cohort verdict is the first thing open.
-    for r in rows:
-        s = by_sid[r["sid"]]
-        inner = report_body(s.report, s.inputs if with_figures else {}, s.cfg,
-                            with_note=False)
-        body.append(
-            f'<details class="subj"><summary>{_vpill(r["verdict"])} '
-            f'&nbsp;{esc(r["sid"])}</summary>'
-            f'<div class="inner">{inner}</div></details>')
-
-    body.append(
-        '<div class="note" style="margin-top:1.6rem">A verdict marked '
-        '<b>provisional</b> was decided by an <b>uncalibrated</b> cutoff &mdash; an '
-        'engineering default with no published derivation. Checks marked <b>N/A</b> or '
-        '<b>INFO</b> are excluded from the overall verdict. Each subject is graded on '
-        'the checks its own files justify, so two subjects in one cohort can be graded '
-        'on different sets &mdash; the count in each report says which.</div>')
-    return "".join(body)
+    out.append(
+        '<div class="note" style="margin-top:1.6rem">Open any row for that '
+        'subject&rsquo;s full report. A verdict marked <b>provisional</b> was decided '
+        'by an <b>uncalibrated</b> cutoff &mdash; an engineering default with no '
+        'published derivation. Checks marked <b>N/A</b> or <b>INFO</b> are excluded '
+        'from the overall verdict. Each subject is graded on the checks its own files '
+        'justify, so two subjects in one cohort can be graded on different sets.</div>')
+    return "".join(out)
 
 
 def render_cohort_html(subjects, summary, cfg: QCConfig | None = None,

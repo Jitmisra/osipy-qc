@@ -180,12 +180,48 @@ def test_the_cohort_page_is_self_contained(tmp_path):
     assert html.count('src="data:image/') >= 1, "figures are not embedded"
 
 
-def test_every_subject_appears_once_in_the_ledger_and_once_in_full(tmp_path):
+def test_each_subject_appears_exactly_once(tmp_path):
+    """It used to be a table of subjects followed by the same subjects again as
+    collapsed cards: two lists of one thing, the second saying nothing the first
+    did not. The ledger row now expands into the full report itself."""
     subs, summary = _cohort(tmp_path)
     html = render_cohort_html(subs, summary)
-    assert html.count('class="subj"') == len(subs)
+    assert html.count('<details class="lrow"') == len(subs)
+    assert 'class="subj"' not in html, "the duplicate card list is back"
     for s in subs:
         assert s.sid in html
+
+
+def test_the_cohort_answers_what_no_single_report_can(tmp_path):
+    """A cohort view earns its place by saying how the group is spread and
+    whether a finding is one bad scan or a systemic problem. summarise() has
+    counted that all along and nothing rendered it."""
+    subs, summary = _cohort(tmp_path)
+    html = render_cohort_html(subs, summary)
+    assert "What flagged, and in how many subjects" in html
+    assert "median QEI" in html
+    # every check that flagged is named, with the number of subjects it hit
+    for label, _n in summary.artifact_breakdown[:3]:
+        assert label in html
+
+
+def test_there_is_exactly_one_hero_figure(tmp_path):
+    """Three equal-weight stat cards saying "2  1  3" buried the story. The
+    dataviz rule is one hero per view."""
+    subs, summary = _cohort(tmp_path)
+    html = render_cohort_html(subs, summary)
+    assert html.count('class="big"') == 1
+
+
+def test_the_qei_bar_never_carries_its_meaning_by_colour_alone(tmp_path):
+    """WARN amber and PASS green sit 12 dE apart even with full colour vision -
+    the palette validator flags that pair - so every bar keeps its verdict in
+    text beside it and its value as a number."""
+    subs, summary = _cohort(tmp_path)
+    html = render_cohort_html(subs, summary)
+    for s in subs:
+        assert f'>{s.overall}</span>' in html, f"{s.sid}: verdict not in text"
+    assert 'class="qnum"' in html
 
 
 def test_the_worst_subject_is_listed_first(tmp_path):
@@ -269,8 +305,8 @@ def test_the_cohort_html_comes_back_from_the_html_path(tmp_path):
     fields = web._parse_multipart(_cohort_body(3),
                                   f"multipart/form-data; boundary={BOUNDARY}")
     html, token = web._grade_upload_html(fields)
-    assert "subjects graded" in html
-    assert html.count('class="subj"') == 3
+    assert html.count('<details class="lrow"') == 3
+    assert 'class="ledger"' in html
 
 
 def test_too_many_subjects_is_refused_with_a_reason(monkeypatch):

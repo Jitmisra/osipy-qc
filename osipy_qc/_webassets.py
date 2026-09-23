@@ -90,10 +90,24 @@ a:hover{text-decoration:underline}
   text-transform:uppercase;color:var(--faint)}
 
 /* generic top bar (report + upload console) */
-.topbar{display:flex;align-items:center;gap:.7rem;max-width:1120px;margin:0 auto;padding:1.1rem 1.5rem}
+.topbar{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem;max-width:1120px;
+  margin:0 auto;padding:1.1rem 1.5rem}
 .topbar .spacer{flex:1}
 .topbar .meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);
-  background:var(--surface);border:1px solid var(--line);border-radius:100px;padding:.3rem .75rem;white-space:nowrap}
+  background:var(--surface);border:1px solid var(--line);border-radius:100px;
+  padding:.3rem .75rem;white-space:nowrap}
+/* `population: adult - organ: brain - strict: True` is nowrap and cannot shrink,
+   so on a phone it made the whole DOCUMENT wider than the viewport: the report
+   then scrolled sideways and every verdict pill sat off the right edge. It drops
+   to its own line instead. */
+@media (max-width:640px){
+  .topbar{padding:.9rem 1rem}
+  .topbar .spacer{display:none}
+  .topbar .meta{flex:1 1 100%;white-space:normal;text-align:left}
+}
+/* Nothing on either page has a reason to scroll sideways, and when something
+   does it is always a bug that hides content off the right edge. */
+html,body{overflow-x:hidden}
 
 /* chips + pills */
 .chip{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--mono);
