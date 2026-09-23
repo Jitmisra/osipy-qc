@@ -81,9 +81,16 @@ _CONSOLE_CSS = """
 .strict{display:flex;gap:.55rem;align-items:flex-start;font-size:.82rem;color:var(--muted)}
 .strict input{margin-top:.2rem}
 
-.dropall{display:flex;align-items:center;gap:1rem;padding:1.5rem 1.4rem;min-height:132px;
+.dropall{display:flex;flex-wrap:wrap;align-items:center;gap:1rem;padding:1.5rem 1.4rem;
+  min-height:132px;
   border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface);
   transition:border-color .15s,background .15s}
+/* The caption takes the room it needs and no more; the file list below gets a
+   whole row to itself. Without the wrap these were siblings in one row and the
+   list was squeezed into 46% of the width, which a real NIfTI name does not fit
+   in - `C03_..._T1w_label-CSF_probseg_aslspace.nii.gz` wrapped onto two lines
+   and its label broke into three. */
+.dropall .txt{flex:1 1 22rem;min-width:0}
 .dropall.over{border-color:var(--accent);background:var(--accent-050)}
 .dropbtns{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
 .dbtn{display:inline-flex;align-items:center;min-height:38px;padding:0 1rem;
@@ -98,10 +105,29 @@ _CONSOLE_CSS = """
 .dropall .ico{font-size:1.7rem;color:var(--accent);line-height:1}
 .dropall .txt b{display:block;font-size:1.05rem}
 .dropall .txt small{color:var(--muted)}
-.picked{margin-left:auto;display:flex;flex-direction:column;gap:.2rem;max-width:46%}
+.picked:not(:empty){flex:1 1 100%;order:3;display:flex;flex-direction:column;gap:.25rem;
+  margin-top:.3rem;padding-top:.7rem;border-top:1px solid var(--line);
+  /* a cohort can be dozens of files; scroll rather than push the button off-screen */
+  max-height:12rem;overflow-y:auto}
 .picked span{font-family:var(--mono);font-size:.72rem;color:var(--muted);
-  display:flex;justify-content:space-between;gap:.6rem}
-.picked span b{color:var(--accent-600);font-weight:600}
+  display:flex;justify-content:space-between;align-items:baseline;gap:.9rem}
+/* the NAME may be elided, the ROLE never wraps: it is two or three short words
+   and stacking them vertically is what made the list unreadable */
+.picked span>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picked span b{flex:none;white-space:nowrap;color:var(--accent-600);font-weight:600}
+.cohortnote{flex:1 1 100%;order:2}
+@media (max-width:560px){
+  .picked span{flex-direction:column;gap:.1rem;align-items:stretch}
+  /* Stacked, the name gets the full row, so it WRAPS rather than being elided:
+     on a narrow screen the whole filename is the useful thing, and an ellipsis
+     hides the part that distinguishes one subject from the next. Without the
+     stretch the child sized to its own nowrap content and ran past the card. */
+  .picked span>span{white-space:normal;overflow:visible;overflow-wrap:anywhere}
+  .picked span b{font-size:.68rem}
+  /* each entry is three lines here rather than one, so the same cap showed
+     barely three files and cut the fourth in half */
+  .picked:not(:empty){max-height:20rem}
+}
 .manual{margin-top:1rem;border-top:1px solid var(--line);padding-top:.9rem}
 .manual summary{cursor:pointer;font-size:.85rem;color:var(--muted)}
 .manual summary:hover{color:var(--ink)}
@@ -133,6 +159,7 @@ _CONSOLE_CSS = """
    Ring the CARD when the input inside it has keyboard focus. */
 .drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .cohortnote{margin:.7rem 0 0;padding:.5rem .8rem;border-radius:8px;font-size:.85rem;
+  flex:1 1 100%;
   background:var(--accent-050);color:var(--accent-600);border:1px solid var(--accent-050);
   font-weight:600}
 .cohortnote.over{background:#FBE4E0;border-color:#F1C7C0;color:#7a2a20}

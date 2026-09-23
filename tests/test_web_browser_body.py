@@ -551,3 +551,38 @@ def test_the_duplicated_minimum_inputs_block_is_gone():
     assert "Minimum inputs" not in page
     assert "Whatever you give, the report states how many checks" not in page
     assert "one is enough" in page, "the fact itself must survive the cut"
+
+
+def test_the_picked_file_list_gets_its_own_row():
+    """It was a flex sibling of the caption, capped at 46% of the drop zone.
+
+    A real NIfTI name does not fit in that: `C03_..._T1w_label-CSF_probseg_
+    aslspace.nii.gz` wrapped onto two lines, and its role label - three short
+    words - broke into three stacked lines beside it. Seven files rendered as a
+    column of fragments.
+    """
+    page = web._upload_page()
+    assert ".dropall{display:flex;flex-wrap:wrap" in page, "the zone cannot wrap"
+    assert ".picked:not(:empty){flex:1 1 100%" in page, "the list is not on its own row"
+    assert "max-width:46%" not in page, "the old width cap is back"
+
+
+def test_a_role_label_never_wraps_and_a_filename_never_overflows():
+    """The two halves of a row fail differently: the name is long and may be
+    elided, the label is short and must stay on one line."""
+    page = web._upload_page()
+    assert ".picked span>span{min-width:0;overflow:hidden;text-overflow:ellipsis" in page
+    assert ".picked span b{flex:none;white-space:nowrap" in page
+
+
+def test_on_a_narrow_screen_the_filename_wraps_instead_of_overflowing():
+    """Stacked, the name sized to its own nowrap content and ran past the card
+    edge - overflow:hidden clipped at its own oversized box, not the container.
+    On a phone the whole filename is the useful thing, so it wraps."""
+    page = web._upload_page()
+    # asserted as rules, not by slicing a block: the page has two
+    # `@media (max-width:560px)` sections and the slice took the wrong one
+    assert ".picked span{flex-direction:column;gap:.1rem;align-items:stretch}" in page
+    assert ".picked span>span{white-space:normal;overflow:visible;overflow-wrap:anywhere}" in page
+    # and each stacked entry is three lines, so the scroll cap is raised to match
+    assert ".picked:not(:empty){max-height:20rem}" in page
